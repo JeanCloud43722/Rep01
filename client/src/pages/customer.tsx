@@ -16,7 +16,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Calendar,
-  Smartphone
+  Smartphone,
+  Send
 } from "lucide-react";
 
 function getStatusConfig(status: Order["status"]) {
@@ -409,6 +410,27 @@ export default function CustomerPage() {
           />
         ) : (
           <SubscribedCard order={order} />
+        )}
+        
+        {order.messages.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Send className="h-4 w-4" />
+                Messages ({order.messages.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {order.messages.map((msg) => (
+                  <div key={msg.id} className="border-l-2 border-primary pl-3 py-2" data-testid={`message-item-${msg.id}`}>
+                    <p className="text-sm text-foreground">{msg.text}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{formatTime(msg.sentAt)}</p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         )}
         
         <p className="text-center text-xs text-muted-foreground px-4">

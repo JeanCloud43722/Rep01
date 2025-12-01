@@ -75,6 +75,10 @@ async function sendPushNotification(orderId: string, message?: string) {
     // Send first notification immediately
     await sendSinglePushNotification(orderId, message, 1);
     
+    // Add message to order history
+    const notificationText = message || "Your order is ready for pickup!";
+    await storage.addMessage(orderId, notificationText);
+    
     // Send 2nd notification after 2 seconds
     setTimeout(() => {
       sendSinglePushNotification(orderId, message, 2).catch(error => {

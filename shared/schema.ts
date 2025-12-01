@@ -20,13 +20,22 @@ export const pushSubscriptionSchema = z.object({
 
 export type PushSubscriptionData = z.infer<typeof pushSubscriptionSchema>;
 
+export const messageSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  sentAt: z.string()
+});
+
+export type Message = z.infer<typeof messageSchema>;
+
 export const orderSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
   status: orderStatusEnum,
   subscription: pushSubscriptionSchema.nullable(),
   scheduledTime: z.string().nullable(),
-  notifiedAt: z.string().nullable()
+  notifiedAt: z.string().nullable(),
+  messages: z.array(messageSchema)
 });
 
 export type Order = z.infer<typeof orderSchema>;
