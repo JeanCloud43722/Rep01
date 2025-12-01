@@ -71,3 +71,17 @@ npm run dev  # Start development server on port 5000
 - Web push notification system with VAPID authentication
 - Scheduled notifications using node-schedule
 - Beautiful responsive UI following design guidelines
+- Fixed VAPID key conversion for proper push subscription
+- Static VAPID keys from environment variables for persistent subscriptions
+
+## Environment Variables
+- `VAPID_PUBLIC_KEY` - Public key for web push notifications
+- `VAPID_PRIVATE_KEY` - Private key for web push notifications
+
+## How to Use
+1. **Create Order**: Click "New Order" button on admin dashboard
+2. **Share QR Code**: Click "QR Code" button on order card to display scannable QR
+3. **Customer Subscribes**: Customer scans QR, opens page, clicks "Enable Notifications"
+4. **Send Notification**: Once subscribed, "Notify Now" and "Schedule" buttons appear
+5. **Immediate Notification**: Click "Notify Now" to send push immediately
+6. **Scheduled Notification**: Click "Schedule" to set future notification time
