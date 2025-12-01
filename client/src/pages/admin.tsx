@@ -321,7 +321,13 @@ function ScheduleModal({
   
   const handleSubmit = () => {
     if (orderId && scheduledTime) {
-      onSchedule(orderId, scheduledTime, message || "Your order is ready for pickup!");
+      // Convert local datetime to ISO string for backend
+      // datetime-local input returns "2025-12-01T21:00"
+      // We need to convert it to proper ISO format
+      const localDate = new Date(scheduledTime);
+      const isoString = localDate.toISOString();
+      
+      onSchedule(orderId, isoString, message || "Your order is ready for pickup!");
       onClose();
       setScheduledTime("");
       setMessage("");

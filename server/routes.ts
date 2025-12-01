@@ -267,12 +267,21 @@ export async function registerRoutes(
         console.log(`[Schedule] Cancelled previous job for order ${req.params.id}`);
       }
       
+      const scheduledDate = new Date(scheduledTime);
+      const now = new Date();
+      
+      // Validate that scheduled time is in the future
+      if (scheduledDate <= now) {
+        return res.status(400).json({ error: "Scheduled time must be in the future" });
+      }
+      
+      console.log(`[Schedule] Request to schedule for ${scheduledDate.toISOString()}, current time: ${now.toISOString()}, delay: ${Math.round((scheduledDate.getTime() - now.getTime()) / 1000)}s`);
+      
       const order = await storage.updateOrderScheduledTime(req.params.id, scheduledTime);
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
       
-      const scheduledDate = new Date(scheduledTime);
       scheduleNotification(req.params.id, scheduledDate, message);
       
       res.json(order);
