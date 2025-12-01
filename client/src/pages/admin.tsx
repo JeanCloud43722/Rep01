@@ -256,23 +256,31 @@ function NotifyModal({
   onClose: () => void;
   onNotify: (orderId: string, message: string) => void;
 }) {
-  const [message, setMessage] = useState("");
+  const DEFAULT_MESSAGE = "Your order is ready for pickup!";
+  const [message, setMessage] = useState(DEFAULT_MESSAGE);
   
   const handleSubmit = () => {
     if (orderId) {
-      onNotify(orderId, message || "Your order is ready for pickup!");
+      onNotify(orderId, message);
       onClose();
-      setMessage("");
+      setMessage(DEFAULT_MESSAGE);
     }
   };
   
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      setMessage(DEFAULT_MESSAGE);
+    }
+    onClose();
+  };
+  
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Send Notification</DialogTitle>
           <DialogDescription>
-            Enter a custom message for the customer
+            Edit the message or send as is
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
@@ -280,7 +288,6 @@ function NotifyModal({
             <Label htmlFor="notification-message">Message</Label>
             <Input
               id="notification-message"
-              placeholder="Your order is ready for pickup!"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               data-testid="input-notification-message"
@@ -316,8 +323,9 @@ function ScheduleModal({
   onClose: () => void;
   onSchedule: (orderId: string, time: string, message: string) => void;
 }) {
+  const DEFAULT_MESSAGE = "Your order is ready for pickup!";
   const [scheduledTime, setScheduledTime] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(DEFAULT_MESSAGE);
   
   const handleSubmit = () => {
     if (orderId && scheduledTime) {
@@ -327,15 +335,23 @@ function ScheduleModal({
       const localDate = new Date(scheduledTime);
       const isoString = localDate.toISOString();
       
-      onSchedule(orderId, isoString, message || "Your order is ready for pickup!");
+      onSchedule(orderId, isoString, message);
       onClose();
       setScheduledTime("");
-      setMessage("");
+      setMessage(DEFAULT_MESSAGE);
     }
   };
   
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      setScheduledTime("");
+      setMessage(DEFAULT_MESSAGE);
+    }
+    onClose();
+  };
+  
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Schedule Notification</DialogTitle>
@@ -355,10 +371,9 @@ function ScheduleModal({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="schedule-message">Message (optional)</Label>
+            <Label htmlFor="schedule-message">Message</Label>
             <Input
               id="schedule-message"
-              placeholder="Your order is ready for pickup!"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               data-testid="input-schedule-message"
