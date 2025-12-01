@@ -26,7 +26,8 @@ import {
   Users,
   CheckCircle2,
   AlertCircle,
-  Gift
+  Gift,
+  Wrench
 } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -112,6 +113,13 @@ function OrderCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {order.serviceRequests.length > 0 && (
+          <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 border border-destructive/30">
+            <Wrench className="h-4 w-4 flex-shrink-0" />
+            <span className="font-medium">Service Requested ({order.serviceRequests.length})</span>
+          </div>
+        )}
+        
         {order.scheduledTime && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
             <Clock className="h-4 w-4" />

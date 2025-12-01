@@ -351,5 +351,21 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/:id/service", async (req, res) => {
+    try {
+      const order = await storage.addServiceRequest(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Notify WebSocket subscribers
+      notifyOrderUpdate(req.params.id);
+      
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to request service" });
+    }
+  });
+
   return httpServer;
 }

@@ -18,7 +18,8 @@ import {
   Calendar,
   Smartphone,
   Send,
-  Gift
+  Gift,
+  Wrench
 } from "lucide-react";
 
 function getStatusConfig(status: Order["status"]) {
@@ -208,7 +209,7 @@ function NotificationPermissionCard({ onEnable, isPending }: { onEnable: () => v
   );
 }
 
-function SubscribedCard({ order }: { order: Order }) {
+function SubscribedCard({ order, onRequestService, isRequestingService }: { order: Order; onRequestService: () => void; isRequestingService: boolean }) {
   const statusConfig = getStatusConfig(order.status);
   const StatusIcon = statusConfig.icon;
   
@@ -238,6 +239,22 @@ function SubscribedCard({ order }: { order: Order }) {
             <Check className="h-4 w-4" />
             <span>Notifications are enabled</span>
           </div>
+          
+          <Button 
+            variant="outline"
+            size="sm"
+            onClick={onRequestService}
+            disabled={isRequestingService}
+            className="mt-2"
+            data-testid="button-request-service"
+          >
+            {isRequestingService ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Wrench className="h-4 w-4 mr-2" />
+            )}
+            Request Service
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -315,6 +332,15 @@ export default function CustomerPage() {
     }
   });
   
+  const serviceRequestMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/orders/${orderId}/service`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+    }
+  });
+  
   const handleEnableNotifications = async () => {
     if (!orderId) return;
     
@@ -322,6 +348,10 @@ export default function CustomerPage() {
     if (subscription) {
       subscribeMutation.mutate(subscription);
     }
+  };
+  
+  const handleRequestService = () => {
+    serviceRequestMutation.mutate();
   };
   
   useEffect(() => {
@@ -410,7 +440,7 @@ export default function CustomerPage() {
             isPending={subscribeMutation.isPending}
           />
         ) : (
-          <SubscribedCard order={order} />
+          <SubscribedCard order={order} onRequestService={handleRequestService} isRequestingService={serviceRequestMutation.isPending} />
         )}
         
         {order.messages.length > 0 && (

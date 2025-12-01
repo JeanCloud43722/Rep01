@@ -37,6 +37,13 @@ export const offerSchema = z.object({
 
 export type Offer = z.infer<typeof offerSchema>;
 
+export const serviceRequestSchema = z.object({
+  id: z.string(),
+  requestedAt: z.string()
+});
+
+export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
+
 export const orderSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
@@ -45,7 +52,8 @@ export const orderSchema = z.object({
   scheduledTime: z.string().nullable(),
   notifiedAt: z.string().nullable(),
   messages: z.array(messageSchema),
-  offers: z.array(offerSchema)
+  offers: z.array(offerSchema),
+  serviceRequests: z.array(serviceRequestSchema)
 });
 
 export type Order = z.infer<typeof orderSchema>;
