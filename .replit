@@ -14,6 +14,10 @@ run = ["npm", "run", "start"]
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 46803
+externalPort = 3000
+
 [env]
 PORT = "5000"
 
@@ -37,3 +41,9 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+VAPID_PUBLIC_KEY = "BLpXWP13CEVANBqggMWf6-tL7Tl9E1jH3kDCAURXtS0dbBVGkjeelr22nypxFZ1CpkIpmCxspU2wBztarEO6704"
+VAPID_PRIVATE_KEY = "VUhMgzISniyaS9ueUTMvkbKvdkQ1bYbFp498ENKXEhs"

@@ -1,18 +1,58 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export const orderStatusEnum = z.enum([
+  "waiting",
+  "subscribed", 
+  "scheduled",
+  "notified",
+  "completed"
+]);
+
+export type OrderStatus = z.infer<typeof orderStatusEnum>;
+
+export const pushSubscriptionSchema = z.object({
+  endpoint: z.string(),
+  keys: z.object({
+    p256dh: z.string(),
+    auth: z.string()
+  })
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export type PushSubscriptionData = z.infer<typeof pushSubscriptionSchema>;
+
+export const orderSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  status: orderStatusEnum,
+  subscription: pushSubscriptionSchema.nullable(),
+  scheduledTime: z.string().nullable(),
+  notifiedAt: z.string().nullable()
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export type Order = z.infer<typeof orderSchema>;
+
+export const insertOrderSchema = z.object({});
+
+export type InsertOrder = z.infer<typeof insertOrderSchema>;
+
+export const subscribeSchema = z.object({
+  orderId: z.string(),
+  subscription: pushSubscriptionSchema
+});
+
+export type SubscribeRequest = z.infer<typeof subscribeSchema>;
+
+export const triggerNotificationSchema = z.object({
+  orderId: z.string(),
+  message: z.string().optional()
+});
+
+export type TriggerNotificationRequest = z.infer<typeof triggerNotificationSchema>;
+
+export const scheduleNotificationSchema = z.object({
+  orderId: z.string(),
+  scheduledTime: z.string(),
+  message: z.string().optional()
+});
+
+export type ScheduleNotificationRequest = z.infer<typeof scheduleNotificationSchema>;
