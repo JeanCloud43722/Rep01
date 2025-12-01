@@ -31,10 +31,12 @@ self.addEventListener("push", (event) => {
     body: data.body,
     icon: data.icon || "/favicon.png",
     badge: data.badge || "/favicon.png",
-    vibrate: [200, 100, 200],
+    vibrate: [200, 100, 200, 100, 200],
     tag: "order-notification",
     renotify: true,
     requireInteraction: true,
+    silent: false,
+    sound: "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAAA=",
     data: {
       url: data.url || "/"
     }

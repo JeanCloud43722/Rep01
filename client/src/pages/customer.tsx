@@ -65,6 +65,37 @@ function formatTime(isoString: string) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function playReadySound() {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = audioContext.currentTime;
+    
+    // Create oscillators for a pleasant alert sound
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    
+    osc1.frequency.value = 800;
+    osc2.frequency.value = 600;
+    osc1.type = "sine";
+    osc2.type = "sine";
+    
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(audioContext.destination);
+    
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.3);
+    osc2.stop(now + 0.3);
+  } catch (error) {
+    console.error("Failed to play sound:", error);
+  }
+}
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding)
@@ -318,6 +349,8 @@ export default function CustomerPage() {
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
           if (message.type === "order_updated") {
+            // Play audio alert when order is updated
+            playReadySound();
             // Refetch the order data immediately
             queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
           }
