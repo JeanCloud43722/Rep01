@@ -260,7 +260,8 @@ export default function CustomerPage() {
   
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
-    enabled: !!orderId
+    enabled: !!orderId,
+    refetchInterval: 4000
   });
   
   const subscribeMutation = useMutation({

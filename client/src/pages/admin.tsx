@@ -351,7 +351,8 @@ export default function AdminPage() {
   const [scheduleOrderId, setScheduleOrderId] = useState<string | null>(null);
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
-    queryKey: ["/api/orders"]
+    queryKey: ["/api/orders"],
+    refetchInterval: 4000
   });
   
   const createOrderMutation = useMutation({
