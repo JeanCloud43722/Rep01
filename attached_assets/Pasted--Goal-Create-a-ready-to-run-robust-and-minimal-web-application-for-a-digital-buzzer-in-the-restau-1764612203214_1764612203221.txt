@@ -1,0 +1,48 @@
+
+Goal: Create a ready-to-run, robust, and minimal web application for a digital buzzer in the restaurant industry—completely browser-based, without app installation, with web push notifications, unique QR code links, and support for multiple parallel orders.
+
+Important: All code must be fully generated and provided – including backend, frontend, service worker, and simple admin interface. Each component must work without external build steps (no npm, no webpack) and be startable locally with python app.py. Runability is the highest priority.
+
+Backend: Python 3 + Flask (no external frameworks except Flask, apscheduler)
+Frontend: Pure HTML + JavaScript (no frameworks such as React/Vue)
+Data storage: In-memory (dictionary) – sufficient for demo; scalable to DB
+Web push: Must work via service worker and push API; allowed on localhost
+HTTPS note: Web push is permitted locally on localhost → no certificates required
+Restaurateur creates order
+→ Generates unique, short order ID (e.g., a1b2c3d4)
+→ Creates QR code link such as http://localhost:5000/order/a1b2c3d4
+→ Provides link + QR code to restaurant owner (e.g., via /admin)
+
+Customer scans QR code
+→ Opens browser-based page at /order/<id>
+→ Can activate web push notifications (1 click)
+→ No login, no name – identification is only via the link
+
+Restaurateur controls completion
+→ Can either:
+a) Trigger manually (immediate notification)
+b) Enter exact completion date (ISO format such as 2025-12-02T14:30:00)
+→ System sends a web push notification at the specified time or when triggered manually
+
+System supports multiple orders simultaneously
+→ Each order has its own status (ID, time, push subscription, status)
+
+app.py → Flask backend with the following routes:
+POST /create-order → creates new order + QR link
+GET /order/<id> → displays customer front end
+POST /subscribe/<id> → saves push subscription
+POST /trigger/<id> → trigger manually or based on time
+GET /admin → simple restaurant interface (HTML)
+templates/customer.html → customer page with push activation
+templates/admin.html → restaurateur UI for creating/triggering
+static/sw.js → service worker for web push
+(Optional) Placeholder for icon-192.png/badge.png – or without icons
+No missing imports or variables
+No placeholders such as “TODO” or “INSERT_KEY” – for VAPID: either omit or include a note that the demo works without real push
+Code must start with python app.py and run on http://localhost:5000
+Web push must be viewable on localhost (even if not sent – permission prompt must appear)
+Minimal but complete: no superfluous features, but all requirements mentioned are covered
+Deliver the entire code – file by file – in clearly separated code blocks with file names.
+The goal is a copyable, immediately executable solution – no concept, no pseudocode.
+
+Translated with DeepL.com (free version)
