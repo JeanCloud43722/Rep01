@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { FileText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,7 +29,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Gift,
-  Wrench
+  Wrench,
+  Edit
 } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -79,7 +82,8 @@ function OrderCard({
   onTrigger, 
   onSchedule, 
   onDelete,
-  onAddOffer
+  onAddOffer,
+  onEditNotes
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
@@ -87,6 +91,7 @@ function OrderCard({
   onSchedule: (orderId: string) => void;
   onDelete: (orderId: string) => void;
   onAddOffer: (orderId: string) => void;
+  onEditNotes: (orderId: string) => void;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   
@@ -117,6 +122,16 @@ function OrderCard({
           <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 border border-destructive/30">
             <Wrench className="h-4 w-4 flex-shrink-0" />
             <span className="font-medium">Service Requested ({order.serviceRequests.length})</span>
+          </div>
+        )}
+
+        {order.notes && (
+          <div className="flex items-start gap-2 text-sm bg-muted/50 rounded-md px-3 py-2">
+            <FileText className="h-4 w-4 flex-shrink-0 mt-0.5 text-muted-foreground" />
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-xs text-muted-foreground mb-1">Notes</p>
+              <p className="text-foreground break-words">{order.notes}</p>
+            </div>
           </div>
         )}
         
@@ -168,6 +183,16 @@ function OrderCard({
           >
             <Gift className="h-4 w-4 mr-1" />
             Offer
+          </Button>
+
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => onEditNotes(order.id)}
+            data-testid={`button-edit-notes-${order.id}`}
+          >
+            <Edit className="h-4 w-4 mr-1" />
+            Notes
           </Button>
           
           <Button 
@@ -334,6 +359,79 @@ function AddOfferModal({
             <Button onClick={handleSubmit} data-testid="button-confirm-offer">
               <Gift className="h-4 w-4 mr-1" />
               Add Offer
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NotesModal({
+  orderId,
+  open,
+  onClose,
+  onSaveNotes,
+  initialNotes
+}: {
+  orderId: string | null;
+  open: boolean;
+  onClose: () => void;
+  onSaveNotes: (orderId: string, notes: string) => void;
+  initialNotes: string;
+}) {
+  const [notes, setNotes] = useState(initialNotes);
+  
+  const handleSubmit = () => {
+    if (orderId) {
+      onSaveNotes(orderId, notes);
+      onClose();
+    }
+  };
+  
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      setNotes(initialNotes);
+    }
+    onClose();
+  };
+
+  useEffect(() => {
+    setNotes(initialNotes);
+  }, [initialNotes, open]);
+  
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Notes</DialogTitle>
+          <DialogDescription>
+            Add a name, table number, or any notes for this order
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="order-notes">Notes (max 500 characters)</Label>
+            <Textarea
+              id="order-notes"
+              placeholder="e.g., Table 5, John Smith"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              maxLength={500}
+              data-testid="input-order-notes"
+              className="resize-none"
+            />
+            <p className="text-xs text-muted-foreground">
+              {notes.length}/500 characters
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} data-testid="button-confirm-notes">
+              <FileText className="h-4 w-4 mr-1" />
+              Save Notes
             </Button>
           </div>
         </div>
@@ -545,6 +643,7 @@ export default function AdminPage() {
   const [notifyOrderId, setNotifyOrderId] = useState<string | null>(null);
   const [scheduleOrderId, setScheduleOrderId] = useState<string | null>(null);
   const [offerOrderId, setOfferOrderId] = useState<string | null>(null);
+  const [notesOrderId, setNotesOrderId] = useState<string | null>(null);
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
@@ -656,6 +755,25 @@ export default function AdminPage() {
   const handleAddOffer = (orderId: string, title: string, description: string) => {
     addOfferMutation.mutate({ orderId, title, description });
   };
+
+  const updateNotesMutation = useMutation({
+    mutationFn: async (data: { orderId: string; notes: string }) => {
+      return apiRequest("PATCH", `/api/orders/${data.orderId}/notes`, {
+        notes: data.notes
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ description: "Notes updated successfully" });
+    },
+    onError: () => {
+      toast({ description: "Failed to update notes", variant: "destructive" });
+    }
+  });
+
+  const handleSaveNotes = (orderId: string, notes: string) => {
+    updateNotesMutation.mutate({ orderId, notes });
+  };
   
   const activeOrders = orders?.filter(o => o.status !== "completed") ?? [];
   const completedOrders = orders?.filter(o => o.status === "completed") ?? [];
@@ -729,6 +847,7 @@ export default function AdminPage() {
                     onSchedule={setScheduleOrderId}
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
                     onAddOffer={setOfferOrderId}
+                    onEditNotes={setNotesOrderId}
                   />
                 ))}
               </div>
@@ -751,6 +870,7 @@ export default function AdminPage() {
                     onSchedule={setScheduleOrderId}
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
                     onAddOffer={setOfferOrderId}
+                    onEditNotes={setNotesOrderId}
                   />
                 ))}
               </div>
@@ -784,6 +904,14 @@ export default function AdminPage() {
         open={!!offerOrderId}
         onClose={() => setOfferOrderId(null)}
         onAddOffer={handleAddOffer}
+      />
+
+      <NotesModal
+        orderId={notesOrderId}
+        open={!!notesOrderId}
+        onClose={() => setNotesOrderId(null)}
+        onSaveNotes={handleSaveNotes}
+        initialNotes={orders?.find(o => o.id === notesOrderId)?.notes || ""}
       />
     </div>
   );

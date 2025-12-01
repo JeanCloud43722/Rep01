@@ -367,5 +367,30 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/orders/:id/notes", async (req, res) => {
+    try {
+      const notesSchema = z.object({
+        notes: z.string().max(500)
+      });
+      
+      const { notes } = notesSchema.parse(req.body);
+      
+      const order = await storage.updateOrderNotes(req.params.id, notes);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Notify WebSocket subscribers
+      notifyOrderUpdate(req.params.id);
+      
+      res.json(order);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid notes data" });
+      }
+      res.status(500).json({ error: "Failed to update notes" });
+    }
+  });
+
   return httpServer;
 }

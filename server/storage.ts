@@ -17,6 +17,7 @@ export interface IStorage {
   addMessage(id: string, message: string): Promise<Order | undefined>;
   addOffer(id: string, title: string, description: string): Promise<Order | undefined>;
   addServiceRequest(id: string): Promise<Order | undefined>;
+  updateOrderNotes(id: string, notes: string): Promise<Order | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -47,7 +48,8 @@ export class MemStorage implements IStorage {
       notifiedAt: null,
       messages: [],
       offers: [],
-      serviceRequests: []
+      serviceRequests: [],
+      notes: ""
     };
     this.orders.set(id, order);
     return order;
@@ -137,6 +139,15 @@ export class MemStorage implements IStorage {
     };
     
     order.serviceRequests.push(serviceRequest);
+    this.orders.set(id, order);
+    return order;
+  }
+
+  async updateOrderNotes(id: string, notes: string): Promise<Order | undefined> {
+    const order = this.orders.get(id);
+    if (!order) return undefined;
+    
+    order.notes = notes;
     this.orders.set(id, order);
     return order;
   }

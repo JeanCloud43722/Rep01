@@ -442,6 +442,17 @@ export default function CustomerPage() {
         ) : (
           <SubscribedCard order={order} onRequestService={handleRequestService} isRequestingService={serviceRequestMutation.isPending} />
         )}
+
+        {order.notes && (
+          <Card>
+            <CardContent className="pt-6">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-muted-foreground">Order Notes</p>
+                <p className="text-foreground">{order.notes}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         
         {order.messages.length > 0 && (
           <Card>

@@ -53,7 +53,8 @@ export const orderSchema = z.object({
   notifiedAt: z.string().nullable(),
   messages: z.array(messageSchema),
   offers: z.array(offerSchema),
-  serviceRequests: z.array(serviceRequestSchema)
+  serviceRequests: z.array(serviceRequestSchema),
+  notes: z.string().optional()
 });
 
 export type Order = z.infer<typeof orderSchema>;
