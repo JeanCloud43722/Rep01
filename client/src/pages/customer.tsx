@@ -78,11 +78,12 @@ function formatRemainingTime(scheduledTime: string): string {
   
   const hours = Math.floor(diff / (1000 * 60 * 60));
   const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
   
   if (hours > 0) {
-    return `${hours}h ${minutes}m remaining`;
+    return `${hours}h ${minutes}m ${seconds}s remaining`;
   }
-  return `${minutes}m remaining`;
+  return `${minutes}m ${seconds}s remaining`;
 }
 
 function playReadySound() {
