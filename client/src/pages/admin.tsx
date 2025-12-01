@@ -84,7 +84,7 @@ function OrderCard({
   onSchedule: (orderId: string) => void;
   onDelete: (orderId: string) => void;
 }) {
-  const canNotify = order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
+  const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   
   return (
     <Card className="hover-elevate transition-all duration-200">
@@ -245,6 +245,66 @@ function QRCodeModal({
   );
 }
 
+function NotifyModal({
+  orderId,
+  open,
+  onClose,
+  onNotify
+}: {
+  orderId: string | null;
+  open: boolean;
+  onClose: () => void;
+  onNotify: (orderId: string, message: string) => void;
+}) {
+  const [message, setMessage] = useState("");
+  
+  const handleSubmit = () => {
+    if (orderId) {
+      onNotify(orderId, message || "Your order is ready for pickup!");
+      onClose();
+      setMessage("");
+    }
+  };
+  
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Send Notification</DialogTitle>
+          <DialogDescription>
+            Enter a custom message for the customer
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="notification-message">Message</Label>
+            <Input
+              id="notification-message"
+              placeholder="Your order is ready for pickup!"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              data-testid="input-notification-message"
+              maxLength={100}
+            />
+            <p className="text-xs text-muted-foreground">
+              {message.length}/100 characters
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} data-testid="button-confirm-notify">
+              <Send className="h-4 w-4 mr-1" />
+              Send Notification
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ScheduleModal({
   orderId,
   open,
@@ -254,15 +314,17 @@ function ScheduleModal({
   orderId: string | null;
   open: boolean;
   onClose: () => void;
-  onSchedule: (orderId: string, time: string) => void;
+  onSchedule: (orderId: string, time: string, message: string) => void;
 }) {
   const [scheduledTime, setScheduledTime] = useState("");
+  const [message, setMessage] = useState("");
   
   const handleSubmit = () => {
     if (orderId && scheduledTime) {
-      onSchedule(orderId, scheduledTime);
+      onSchedule(orderId, scheduledTime, message || "Your order is ready for pickup!");
       onClose();
       setScheduledTime("");
+      setMessage("");
     }
   };
   
@@ -285,6 +347,20 @@ function ScheduleModal({
               onChange={(e) => setScheduledTime(e.target.value)}
               data-testid="input-scheduled-time"
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="schedule-message">Message (optional)</Label>
+            <Input
+              id="schedule-message"
+              placeholder="Your order is ready for pickup!"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              data-testid="input-schedule-message"
+              maxLength={100}
+            />
+            <p className="text-xs text-muted-foreground">
+              {message.length}/100 characters
+            </p>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose}>
@@ -348,6 +424,7 @@ function OrdersSkeleton() {
 export default function AdminPage() {
   const { toast } = useToast();
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [notifyOrderId, setNotifyOrderId] = useState<string | null>(null);
   const [scheduleOrderId, setScheduleOrderId] = useState<string | null>(null);
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
@@ -392,7 +469,8 @@ export default function AdminPage() {
   });
   
   const triggerMutation = useMutation({
-    mutationFn: (orderId: string) => apiRequest("POST", `/api/orders/${orderId}/trigger`),
+    mutationFn: ({ orderId, message }: { orderId: string; message: string }) => 
+      apiRequest("POST", `/api/orders/${orderId}/trigger`, { message }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       toast({
@@ -410,8 +488,8 @@ export default function AdminPage() {
   });
   
   const scheduleMutation = useMutation({
-    mutationFn: ({ orderId, scheduledTime }: { orderId: string; scheduledTime: string }) => 
-      apiRequest("POST", `/api/orders/${orderId}/schedule`, { scheduledTime }),
+    mutationFn: ({ orderId, scheduledTime, message }: { orderId: string; scheduledTime: string; message: string }) => 
+      apiRequest("POST", `/api/orders/${orderId}/schedule`, { scheduledTime, message }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       toast({
@@ -432,8 +510,12 @@ export default function AdminPage() {
     createOrderMutation.mutate();
   };
   
-  const handleSchedule = (orderId: string, scheduledTime: string) => {
-    scheduleMutation.mutate({ orderId, scheduledTime });
+  const handleNotify = (orderId: string, message: string) => {
+    triggerMutation.mutate({ orderId, message });
+  };
+  
+  const handleSchedule = (orderId: string, scheduledTime: string, message: string) => {
+    scheduleMutation.mutate({ orderId, scheduledTime, message });
   };
   
   const activeOrders = orders?.filter(o => o.status !== "completed") ?? [];
@@ -504,7 +586,7 @@ export default function AdminPage() {
                     key={order.id}
                     order={order}
                     onShowQR={setSelectedOrder}
-                    onTrigger={(id) => triggerMutation.mutate(id)}
+                    onTrigger={setNotifyOrderId}
                     onSchedule={setScheduleOrderId}
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
                   />
@@ -525,8 +607,8 @@ export default function AdminPage() {
                     key={order.id}
                     order={order}
                     onShowQR={setSelectedOrder}
-                    onTrigger={() => {}}
-                    onSchedule={() => {}}
+                    onTrigger={setNotifyOrderId}
+                    onSchedule={setScheduleOrderId}
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
                   />
                 ))}
@@ -540,6 +622,13 @@ export default function AdminPage() {
         order={selectedOrder}
         open={!!selectedOrder}
         onClose={() => setSelectedOrder(null)}
+      />
+      
+      <NotifyModal
+        orderId={notifyOrderId}
+        open={!!notifyOrderId}
+        onClose={() => setNotifyOrderId(null)}
+        onNotify={handleNotify}
       />
       
       <ScheduleModal
