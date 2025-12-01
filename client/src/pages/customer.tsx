@@ -297,6 +297,55 @@ export default function CustomerPage() {
     }
   }, []);
   
+  useEffect(() => {
+    if (!orderId) return;
+    
+    // Connect to WebSocket for real-time updates
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/orders?id=${orderId}`;
+    
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
+    
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log("Connected to order updates");
+        };
+        
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "order_updated") {
+            // Refetch the order data immediately
+            queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+          }
+        };
+        
+        ws.onclose = () => {
+          // Attempt to reconnect after 3 seconds
+          reconnectTimeout = setTimeout(connect, 3000);
+        };
+        
+        ws.onerror = () => {
+          console.error("WebSocket error");
+          ws?.close();
+        };
+      } catch (error) {
+        console.error("Failed to connect to WebSocket:", error);
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+    
+    connect();
+    
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) ws.close();
+    };
+  }, [orderId]);
+  
   if (isLoading) {
     return <LoadingState />;
   }

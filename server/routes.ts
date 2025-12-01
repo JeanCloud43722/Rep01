@@ -5,6 +5,7 @@ import webPush from "web-push";
 import schedule from "node-schedule";
 import { pushSubscriptionSchema } from "@shared/schema";
 import { z } from "zod";
+import { WebSocketServer } from "ws";
 
 function getVapidKeys() {
   let publicKey = process.env.VAPID_PUBLIC_KEY;
@@ -32,6 +33,9 @@ webPush.setVapidDetails(
 
 const scheduledJobs = new Map<string, schedule.Job>();
 
+// WebSocket client tracking per order
+const orderSubscribers = new Map<string, Set<any>>();
+
 async function sendPushNotification(orderId: string, message?: string) {
   const order = await storage.getOrder(orderId);
   if (!order || !order.subscription) {
@@ -57,6 +61,10 @@ async function sendPushNotification(orderId: string, message?: string) {
     );
     
     await storage.markOrderNotified(orderId);
+    
+    // Notify WebSocket subscribers for this order
+    notifyOrderUpdate(orderId);
+    
     return true;
   } catch (error) {
     console.error("Failed to send push notification:", error);
@@ -64,10 +72,49 @@ async function sendPushNotification(orderId: string, message?: string) {
   }
 }
 
+function notifyOrderUpdate(orderId: string) {
+  const subscribers = orderSubscribers.get(orderId);
+  if (subscribers) {
+    const message = JSON.stringify({ type: "order_updated" });
+    subscribers.forEach((ws) => {
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(message);
+      }
+    });
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  const wss = new WebSocketServer({ server: httpServer, path: "/ws/orders" });
+  
+  wss.on("connection", (ws, req) => {
+    const url = req.url;
+    const orderId = url?.split("?id=")[1];
+    
+    if (!orderId) {
+      ws.close();
+      return;
+    }
+    
+    // Add this connection to the order's subscribers
+    if (!orderSubscribers.has(orderId)) {
+      orderSubscribers.set(orderId, new Set());
+    }
+    orderSubscribers.get(orderId)!.add(ws);
+    
+    ws.on("close", () => {
+      const subscribers = orderSubscribers.get(orderId);
+      if (subscribers) {
+        subscribers.delete(ws);
+        if (subscribers.size === 0) {
+          orderSubscribers.delete(orderId);
+        }
+      }
+    });
+  });
   
   app.get("/api/vapid-public-key", (req, res) => {
     res.json({ publicKey: vapidKeys.publicKey });
