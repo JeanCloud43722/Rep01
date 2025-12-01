@@ -67,6 +67,24 @@ function formatTime(isoString: string) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatRemainingTime(scheduledTime: string): string {
+  const now = new Date();
+  const scheduled = new Date(scheduledTime);
+  const diff = scheduled.getTime() - now.getTime();
+  
+  if (diff <= 0) {
+    return "Should be ready now!";
+  }
+  
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m remaining`;
+  }
+  return `${minutes}m remaining`;
+}
+
 function playReadySound() {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -211,6 +229,19 @@ function NotificationPermissionCard({ onEnable, isPending }: { onEnable: () => v
 function SubscribedCard({ order, onRequestService, isRequestingService }: { order: Order; onRequestService: () => void; isRequestingService: boolean }) {
   const statusConfig = getStatusConfig(order.status);
   const StatusIcon = statusConfig.icon;
+  const [remainingTime, setRemainingTime] = useState<string>("");
+  
+  useEffect(() => {
+    if (!order.scheduledTime || order.status !== "scheduled") return;
+    
+    setRemainingTime(formatRemainingTime(order.scheduledTime));
+    
+    const interval = setInterval(() => {
+      setRemainingTime(formatRemainingTime(order.scheduledTime));
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [order.scheduledTime, order.status]);
   
   return (
     <Card>
@@ -228,9 +259,12 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
           </div>
           
           {order.scheduledTime && order.status === "scheduled" && (
-            <div className="flex items-center gap-2 text-sm bg-muted/50 rounded-lg px-4 py-2">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              <span>Estimated: {formatTime(order.scheduledTime)}</span>
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 text-lg font-semibold text-primary bg-primary/10 rounded-lg px-4 py-3 w-full">
+                <Clock className="h-5 w-5" />
+                <span data-testid="text-remaining-time">{remainingTime}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Ready at {formatTime(order.scheduledTime)}</p>
             </div>
           )}
           
