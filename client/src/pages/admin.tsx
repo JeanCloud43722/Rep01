@@ -84,7 +84,7 @@ function OrderCard({
   onSchedule: (orderId: string) => void;
   onDelete: (orderId: string) => void;
 }) {
-  const canNotify = order.status === "subscribed" || order.status === "scheduled";
+  const canNotify = order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   
   return (
     <Card className="hover-elevate transition-all duration-200">
