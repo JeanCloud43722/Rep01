@@ -25,7 +25,8 @@ import {
   RefreshCw,
   Users,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Gift
 } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -76,13 +77,15 @@ function OrderCard({
   onShowQR, 
   onTrigger, 
   onSchedule, 
-  onDelete 
+  onDelete,
+  onAddOffer
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
   onTrigger: (orderId: string) => void;
   onSchedule: (orderId: string) => void;
   onDelete: (orderId: string) => void;
+  onAddOffer: (orderId: string) => void;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   
@@ -148,6 +151,16 @@ function OrderCard({
               </Button>
             </>
           )}
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => onAddOffer(order.id)}
+            data-testid={`button-add-offer-${order.id}`}
+          >
+            <Gift className="h-4 w-4 mr-1" />
+            Offer
+          </Button>
           
           <Button 
             variant="ghost" 
@@ -239,6 +252,82 @@ function QRCodeModal({
           <p className="text-sm text-muted-foreground text-center">
             Customer scans this code to receive notifications when their order is ready
           </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddOfferModal({
+  orderId,
+  open,
+  onClose,
+  onAddOffer
+}: {
+  orderId: string | null;
+  open: boolean;
+  onClose: () => void;
+  onAddOffer: (orderId: string, title: string, description: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  
+  const handleSubmit = () => {
+    if (orderId && title.trim() && description.trim()) {
+      onAddOffer(orderId, title, description);
+      onClose();
+      setTitle("");
+      setDescription("");
+    }
+  };
+  
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      setTitle("");
+      setDescription("");
+    }
+    onClose();
+  };
+  
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Offer</DialogTitle>
+          <DialogDescription>
+            Add an offer to display to the customer
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="offer-title">Offer Title</Label>
+            <Input
+              id="offer-title"
+              placeholder="e.g., 20% Off Drinks"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              data-testid="input-offer-title"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="offer-description">Description</Label>
+            <Input
+              id="offer-description"
+              placeholder="e.g., Valid today only"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              data-testid="input-offer-description"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} data-testid="button-confirm-offer">
+              <Gift className="h-4 w-4 mr-1" />
+              Add Offer
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -447,6 +536,7 @@ export default function AdminPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [notifyOrderId, setNotifyOrderId] = useState<string | null>(null);
   const [scheduleOrderId, setScheduleOrderId] = useState<string | null>(null);
+  const [offerOrderId, setOfferOrderId] = useState<string | null>(null);
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
@@ -538,6 +628,26 @@ export default function AdminPage() {
   const handleSchedule = (orderId: string, scheduledTime: string, message: string) => {
     scheduleMutation.mutate({ orderId, scheduledTime, message });
   };
+
+  const addOfferMutation = useMutation({
+    mutationFn: async (data: { orderId: string; title: string; description: string }) => {
+      return apiRequest("POST", `/api/orders/${data.orderId}/offers`, {
+        title: data.title,
+        description: data.description
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ description: "Offer added successfully" });
+    },
+    onError: () => {
+      toast({ description: "Failed to add offer", variant: "destructive" });
+    }
+  });
+
+  const handleAddOffer = (orderId: string, title: string, description: string) => {
+    addOfferMutation.mutate({ orderId, title, description });
+  };
   
   const activeOrders = orders?.filter(o => o.status !== "completed") ?? [];
   const completedOrders = orders?.filter(o => o.status === "completed") ?? [];
@@ -610,6 +720,7 @@ export default function AdminPage() {
                     onTrigger={setNotifyOrderId}
                     onSchedule={setScheduleOrderId}
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
+                    onAddOffer={setOfferOrderId}
                   />
                 ))}
               </div>
@@ -631,6 +742,7 @@ export default function AdminPage() {
                     onTrigger={setNotifyOrderId}
                     onSchedule={setScheduleOrderId}
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
+                    onAddOffer={setOfferOrderId}
                   />
                 ))}
               </div>
@@ -657,6 +769,13 @@ export default function AdminPage() {
         open={!!scheduleOrderId}
         onClose={() => setScheduleOrderId(null)}
         onSchedule={handleSchedule}
+      />
+      
+      <AddOfferModal
+        orderId={offerOrderId}
+        open={!!offerOrderId}
+        onClose={() => setOfferOrderId(null)}
+        onAddOffer={handleAddOffer}
       />
     </div>
   );

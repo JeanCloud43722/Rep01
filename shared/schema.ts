@@ -28,6 +28,15 @@ export const messageSchema = z.object({
 
 export type Message = z.infer<typeof messageSchema>;
 
+export const offerSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  createdAt: z.string()
+});
+
+export type Offer = z.infer<typeof offerSchema>;
+
 export const orderSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
@@ -35,7 +44,8 @@ export const orderSchema = z.object({
   subscription: pushSubscriptionSchema.nullable(),
   scheduledTime: z.string().nullable(),
   notifiedAt: z.string().nullable(),
-  messages: z.array(messageSchema)
+  messages: z.array(messageSchema),
+  offers: z.array(offerSchema)
 });
 
 export type Order = z.infer<typeof orderSchema>;

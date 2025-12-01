@@ -1,4 +1,4 @@
-import { type Order, type PushSubscriptionData, type Message } from "@shared/schema";
+import { type Order, type PushSubscriptionData, type Message, type Offer } from "@shared/schema";
 import { randomBytes } from "crypto";
 
 function generateShortId(): string {
@@ -15,6 +15,7 @@ export interface IStorage {
   updateOrderScheduledTime(id: string, scheduledTime: string): Promise<Order | undefined>;
   markOrderNotified(id: string): Promise<Order | undefined>;
   addMessage(id: string, message: string): Promise<Order | undefined>;
+  addOffer(id: string, title: string, description: string): Promise<Order | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -43,7 +44,8 @@ export class MemStorage implements IStorage {
       subscription: null,
       scheduledTime: null,
       notifiedAt: null,
-      messages: []
+      messages: [],
+      offers: []
     };
     this.orders.set(id, order);
     return order;
@@ -103,6 +105,22 @@ export class MemStorage implements IStorage {
     };
     
     order.messages.push(msg);
+    this.orders.set(id, order);
+    return order;
+  }
+
+  async addOffer(id: string, title: string, description: string): Promise<Order | undefined> {
+    const order = this.orders.get(id);
+    if (!order) return undefined;
+    
+    const offer: Offer = {
+      id: generateShortId(),
+      title,
+      description,
+      createdAt: new Date().toISOString()
+    };
+    
+    order.offers.push(offer);
     this.orders.set(id, order);
     return order;
   }

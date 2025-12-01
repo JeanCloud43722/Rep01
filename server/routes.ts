@@ -325,5 +325,31 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/:id/offers", async (req, res) => {
+    try {
+      const offerSchema = z.object({
+        title: z.string().min(1),
+        description: z.string().min(1)
+      });
+      
+      const { title, description } = offerSchema.parse(req.body);
+      
+      const order = await storage.addOffer(req.params.id, title, description);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Notify WebSocket subscribers
+      notifyOrderUpdate(req.params.id);
+      
+      res.json(order);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid offer data" });
+      }
+      res.status(500).json({ error: "Failed to add offer" });
+    }
+  });
+
   return httpServer;
 }
