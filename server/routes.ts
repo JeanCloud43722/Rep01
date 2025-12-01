@@ -36,7 +36,7 @@ const scheduledJobs = new Map<string, schedule.Job>();
 // WebSocket client tracking per order
 const orderSubscribers = new Map<string, Set<any>>();
 
-async function sendPushNotification(orderId: string, message?: string) {
+async function sendSinglePushNotification(orderId: string, message?: string, notificationNumber: number = 1) {
   const order = await storage.getOrder(orderId);
   if (!order || !order.subscription) {
     throw new Error("Order not found or no subscription");
@@ -49,7 +49,8 @@ async function sendPushNotification(orderId: string, message?: string) {
   });
 
   try {
-    console.log(`[Notification] Sending ${message ? 'custom' : 'default'} notification to order ${orderId}`);
+    const notifType = notificationNumber > 1 ? `reminder ${notificationNumber}/3` : "notification";
+    console.log(`[Notification] Sending ${notifType} to order ${orderId}`);
     await webPush.sendNotification(
       {
         endpoint: order.subscription.endpoint,
@@ -61,7 +62,34 @@ async function sendPushNotification(orderId: string, message?: string) {
       payload
     );
     
-    console.log(`[Notification] Successfully sent to order ${orderId}`);
+    console.log(`[Notification] Successfully sent ${notifType} to order ${orderId}`);
+    return true;
+  } catch (error) {
+    console.error(`[Notification] Failed to send notification to order ${orderId}:`, error);
+    throw error;
+  }
+}
+
+async function sendPushNotification(orderId: string, message?: string) {
+  try {
+    // Send first notification immediately
+    await sendSinglePushNotification(orderId, message, 1);
+    
+    // Send 2nd notification after 2 seconds
+    setTimeout(() => {
+      sendSinglePushNotification(orderId, message, 2).catch(error => {
+        console.error("[Notification] 2nd reminder failed:", error);
+      });
+    }, 2000);
+    
+    // Send 3rd notification after 4 seconds
+    setTimeout(() => {
+      sendSinglePushNotification(orderId, message, 3).catch(error => {
+        console.error("[Notification] 3rd reminder failed:", error);
+      });
+    }, 4000);
+    
+    // Mark as notified after first notification
     await storage.markOrderNotified(orderId);
     
     // Notify WebSocket subscribers for this order
