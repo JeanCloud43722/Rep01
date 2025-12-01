@@ -49,6 +49,7 @@ async function sendPushNotification(orderId: string, message?: string) {
   });
 
   try {
+    console.log(`[Notification] Sending ${message ? 'custom' : 'default'} notification to order ${orderId}`);
     await webPush.sendNotification(
       {
         endpoint: order.subscription.endpoint,
@@ -60,6 +61,7 @@ async function sendPushNotification(orderId: string, message?: string) {
       payload
     );
     
+    console.log(`[Notification] Successfully sent to order ${orderId}`);
     await storage.markOrderNotified(orderId);
     
     // Notify WebSocket subscribers for this order
@@ -67,9 +69,30 @@ async function sendPushNotification(orderId: string, message?: string) {
     
     return true;
   } catch (error) {
-    console.error("Failed to send push notification:", error);
+    console.error(`[Notification] Failed to send notification to order ${orderId}:`, error);
     throw error;
   }
+}
+
+function scheduleNotification(orderId: string, scheduledDate: Date, message?: string) {
+  const job = schedule.scheduleJob(scheduledDate, async () => {
+    try {
+      console.log(`[Schedule] Scheduled notification firing for order ${orderId} at ${new Date().toISOString()}`);
+      await sendPushNotification(orderId, message);
+      scheduledJobs.delete(orderId);
+    } catch (error) {
+      console.error(`[Schedule] Scheduled notification failed for order ${orderId}:`, error);
+    }
+  });
+  
+  if (job) {
+    console.log(`[Schedule] Notification scheduled for order ${orderId} at ${scheduledDate.toISOString()}`);
+    scheduledJobs.set(orderId, job);
+  } else {
+    console.warn(`[Schedule] Failed to schedule notification for order ${orderId} at ${scheduledDate.toISOString()}`);
+  }
+  
+  return job;
 }
 
 function notifyOrderUpdate(orderId: string) {
@@ -84,11 +107,39 @@ function notifyOrderUpdate(orderId: string) {
   }
 }
 
+async function restoreScheduledNotifications() {
+  try {
+    console.log("[Startup] Restoring scheduled notifications...");
+    const orders = await storage.getAllOrders();
+    let restoredCount = 0;
+    
+    for (const order of orders) {
+      if (order.scheduledTime && order.status === "scheduled") {
+        const scheduledDate = new Date(order.scheduledTime);
+        const now = new Date();
+        
+        if (scheduledDate > now) {
+          // Schedule the notification if it hasn't fired yet
+          scheduleNotification(order.id, scheduledDate);
+          restoredCount++;
+        }
+      }
+    }
+    
+    console.log(`[Startup] Restored ${restoredCount} scheduled notifications`);
+  } catch (error) {
+    console.error("[Startup] Failed to restore scheduled notifications:", error);
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/orders" });
+  
+  // Restore scheduled notifications on startup
+  await restoreScheduledNotifications();
   
   wss.on("connection", (ws, req) => {
     const url = req.url;
@@ -209,9 +260,11 @@ export async function registerRoutes(
       
       const { scheduledTime, message } = scheduleSchema.parse(req.body);
       
+      // Cancel any existing job
       const existingJob = scheduledJobs.get(req.params.id);
       if (existingJob) {
         existingJob.cancel();
+        console.log(`[Schedule] Cancelled previous job for order ${req.params.id}`);
       }
       
       const order = await storage.updateOrderScheduledTime(req.params.id, scheduledTime);
@@ -220,18 +273,7 @@ export async function registerRoutes(
       }
       
       const scheduledDate = new Date(scheduledTime);
-      const job = schedule.scheduleJob(scheduledDate, async () => {
-        try {
-          await sendPushNotification(req.params.id, message);
-          scheduledJobs.delete(req.params.id);
-        } catch (error) {
-          console.error("Scheduled notification failed:", error);
-        }
-      });
-      
-      if (job) {
-        scheduledJobs.set(req.params.id, job);
-      }
+      scheduleNotification(req.params.id, scheduledDate, message);
       
       res.json(order);
     } catch (error) {
