@@ -18,8 +18,7 @@ import {
   Calendar,
   Smartphone,
   Send,
-  Gift,
-  Wrench
+  Gift
 } from "lucide-react";
 
 function getStatusConfig(status: Order["status"]) {
@@ -241,19 +240,19 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
           </div>
           
           <Button 
-            variant="outline"
-            size="sm"
+            variant="destructive"
+            size="lg"
             onClick={onRequestService}
             disabled={isRequestingService}
-            className="mt-2"
+            className="mt-4 w-full max-w-xs"
             data-testid="button-request-service"
           >
             {isRequestingService ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
             ) : (
-              <Wrench className="h-4 w-4 mr-2" />
+              <AlertCircle className="h-5 w-5 mr-2" />
             )}
-            Request Service
+            {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
           </Button>
         </div>
       </CardContent>
