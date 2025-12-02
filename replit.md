@@ -41,9 +41,14 @@ MVP complete with all core features:
 | GET | `/api/orders/:id` | Get single order |
 | POST | `/api/orders` | Create new order |
 | DELETE | `/api/orders/:id` | Delete order |
-| POST | `/api/orders/:id/subscribe` | Subscribe to push notifications |
+| POST | `/api/orders/:id/register` | Auto-register customer (called when they visit) |
+| POST | `/api/orders/:id/subscribe` | Subscribe to push notifications (optional) |
 | POST | `/api/orders/:id/trigger` | Send immediate notification |
 | POST | `/api/orders/:id/schedule` | Schedule future notification |
+| POST | `/api/orders/:id/service` | Request waiter service |
+| POST | `/api/orders/:id/offers` | Add offer to order |
+| PATCH | `/api/orders/:id/notes` | Update order notes |
+| WebSocket | `/ws/orders?id=:orderId` | Real-time order updates |
 
 ## Order Status Flow
 1. **waiting** - Order created, awaiting customer subscription
@@ -73,6 +78,12 @@ npm run dev  # Start development server on port 5000
 - Beautiful responsive UI following design guidelines
 - Fixed VAPID key conversion for proper push subscription
 - Static VAPID keys from environment variables for persistent subscriptions
+- **Simplified customer experience**: Auto-registration when customers visit the order page
+- **iOS Safari support**: WebSocket-based notifications work on all devices including iOS
+- Push notifications are now optional (used as bonus when browser supports them)
+- Added service request feature (Call Waiter button) for customers
+- Staff notes feature for orders (visible only on admin dashboard)
+- Real-time countdown timer showing remaining time until order is ready
 
 ## Environment Variables
 - `VAPID_PUBLIC_KEY` - Public key for web push notifications
@@ -81,7 +92,19 @@ npm run dev  # Start development server on port 5000
 ## How to Use
 1. **Create Order**: Click "New Order" button on admin dashboard
 2. **Share QR Code**: Click "QR Code" button on order card to display scannable QR
-3. **Customer Subscribes**: Customer scans QR, opens page, clicks "Enable Notifications"
-4. **Send Notification**: Once subscribed, "Notify Now" and "Schedule" buttons appear
-5. **Immediate Notification**: Click "Notify Now" to send push immediately
-6. **Scheduled Notification**: Click "Schedule" to set future notification time
+3. **Customer Visits**: Customer scans QR and is automatically registered (no button click needed!)
+4. **Add Notes**: Click "Notes" button to add table number, name, or other info
+5. **Schedule Notification**: Click "Schedule" to set future notification time with countdown
+6. **Immediate Notification**: Click "Notify Now" to send alert immediately
+7. **Handle Service Requests**: Service requests from customers appear in red on the dashboard
+
+## Notification System
+The system uses a hybrid approach for maximum compatibility:
+- **WebSocket**: Real-time updates work on all devices including iOS Safari
+- **Push Notifications**: Optional enhancement for browsers that support web push
+- **Audio Alerts**: Sound plays when order status changes
+- **Polling**: Fallback polling every 4 seconds ensures updates are never missed
+
+## Known Limitations
+- Data is stored in-memory and will be lost on server restart (for demo purposes)
+- For production use, implement PostgreSQL database for persistent storage

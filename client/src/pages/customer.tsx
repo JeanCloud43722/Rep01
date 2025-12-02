@@ -8,15 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
-  Bell, 
-  BellRing, 
   Check, 
   Clock, 
   Loader2, 
   AlertCircle,
   CheckCircle2,
   Calendar,
-  Smartphone,
   Send,
   Gift
 } from "lucide-react";
@@ -24,24 +21,18 @@ import {
 function getStatusConfig(status: Order["status"]) {
   switch (status) {
     case "waiting":
-      return {
-        icon: Clock,
-        title: "Waiting for Subscription",
-        description: "Enable notifications to know when your order is ready",
-        color: "text-muted-foreground"
-      };
     case "subscribed":
       return {
-        icon: BellRing,
-        title: "Notifications Enabled",
-        description: "We'll notify you when your order is ready",
+        icon: Clock,
+        title: "Order Registered",
+        description: "We're preparing your order. You'll be alerted when it's ready!",
         color: "text-primary"
       };
     case "scheduled":
       return {
         icon: Calendar,
         title: "Order In Progress",
-        description: "Your order is being prepared. You'll be notified soon!",
+        description: "Your order is being prepared. You'll be alerted soon!",
         color: "text-primary"
       };
     case "notified":
@@ -117,116 +108,6 @@ function playReadySound() {
   }
 }
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-async function subscribeToPush(orderId: string): Promise<PushSubscription | null> {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    console.error("Push notifications not supported");
-    return null;
-  }
-  
-  try {
-    const registration = await navigator.serviceWorker.ready;
-    
-    const response = await fetch("/api/vapid-public-key");
-    const { publicKey } = await response.json();
-    
-    const applicationServerKey = urlBase64ToUint8Array(publicKey);
-    
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey
-    });
-    
-    return subscription;
-  } catch (error) {
-    console.error("Failed to subscribe to push:", error);
-    return null;
-  }
-}
-
-function NotificationPermissionCard({ onEnable, isPending }: { onEnable: () => void; isPending: boolean }) {
-  const [permissionState, setPermissionState] = useState<NotificationPermission | "unknown">("unknown");
-  
-  useEffect(() => {
-    if ("Notification" in window) {
-      setPermissionState(Notification.permission);
-    }
-  }, []);
-  
-  if (permissionState === "denied") {
-    return (
-      <Card className="border-destructive/50 bg-destructive/5">
-        <CardContent className="pt-6">
-          <div className="flex flex-col items-center text-center space-y-4">
-            <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">
-              <AlertCircle className="h-8 w-8 text-destructive" />
-            </div>
-            <div className="space-y-2">
-              <h3 className="font-semibold">Notifications Blocked</h3>
-              <p className="text-sm text-muted-foreground">
-                Please enable notifications in your browser settings to receive order updates
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-  
-  return (
-    <Card className="hover-elevate">
-      <CardContent className="pt-6">
-        <div className="flex flex-col items-center text-center space-y-6">
-          <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-            <Bell className="h-10 w-10 text-primary" />
-          </div>
-          
-          <div className="space-y-2">
-            <h3 className="text-lg font-semibold">Get Notified When Ready</h3>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              Enable push notifications to receive an alert when your order is ready for pickup
-            </p>
-          </div>
-          
-          <Button 
-            size="lg" 
-            onClick={onEnable}
-            disabled={isPending}
-            className="w-full max-w-xs"
-            data-testid="button-enable-notifications"
-          >
-            {isPending ? (
-              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-            ) : (
-              <Bell className="h-5 w-5 mr-2" />
-            )}
-            Enable Notifications
-          </Button>
-          
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Smartphone className="h-4 w-4" />
-            <span>Works on mobile and desktop</span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function SubscribedCard({ order, onRequestService, isRequestingService }: { order: Order; onRequestService: () => void; isRequestingService: boolean }) {
   const statusConfig = getStatusConfig(order.status);
   const StatusIcon = statusConfig.icon;
@@ -271,7 +152,7 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
           
           <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-500">
             <Check className="h-4 w-4" />
-            <span>Notifications are enabled</span>
+            <span>This page updates automatically</span>
           </div>
           
           <Button 
@@ -341,6 +222,7 @@ function LoadingState() {
 export default function CustomerPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
+  const [hasRegistered, setHasRegistered] = useState(false);
   
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
@@ -348,20 +230,13 @@ export default function CustomerPage() {
     refetchInterval: 4000
   });
   
-  const subscribeMutation = useMutation({
-    mutationFn: async (subscription: PushSubscription) => {
-      const subData = subscription.toJSON();
-      return apiRequest("POST", `/api/orders/${orderId}/subscribe`, {
-        subscription: {
-          endpoint: subData.endpoint,
-          keys: {
-            p256dh: subData.keys?.p256dh,
-            auth: subData.keys?.auth
-          }
-        }
-      });
+  // Auto-register customer when they visit the page (no button click needed)
+  const registerMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/orders/${orderId}/register`);
     },
     onSuccess: () => {
+      setHasRegistered(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     }
   });
@@ -375,18 +250,16 @@ export default function CustomerPage() {
     }
   });
   
-  const handleEnableNotifications = async () => {
-    if (!orderId) return;
-    
-    const subscription = await subscribeToPush(orderId);
-    if (subscription) {
-      subscribeMutation.mutate(subscription);
-    }
-  };
-  
   const handleRequestService = () => {
     serviceRequestMutation.mutate();
   };
+  
+  // Auto-register when order is loaded and still in "waiting" status
+  useEffect(() => {
+    if (order && order.status === "waiting" && !hasRegistered && !registerMutation.isPending) {
+      registerMutation.mutate();
+    }
+  }, [order, hasRegistered]);
   
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -453,8 +326,6 @@ export default function CustomerPage() {
     return <OrderNotFound />;
   }
   
-  const showSubscriptionCard = order.status === "waiting";
-  
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="max-w-md w-full space-y-6">
@@ -468,14 +339,7 @@ export default function CustomerPage() {
           </p>
         </div>
         
-        {showSubscriptionCard ? (
-          <NotificationPermissionCard 
-            onEnable={handleEnableNotifications}
-            isPending={subscribeMutation.isPending}
-          />
-        ) : (
-          <SubscribedCard order={order} onRequestService={handleRequestService} isRequestingService={serviceRequestMutation.isPending} />
-        )}
+        <SubscribedCard order={order} onRequestService={handleRequestService} isRequestingService={serviceRequestMutation.isPending} />
         
         {order.messages.length > 0 && (
           <Card>

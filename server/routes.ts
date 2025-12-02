@@ -38,8 +38,14 @@ const orderSubscribers = new Map<string, Set<any>>();
 
 async function sendSinglePushNotification(orderId: string, message?: string, notificationNumber: number = 1) {
   const order = await storage.getOrder(orderId);
-  if (!order || !order.subscription) {
-    throw new Error("Order not found or no subscription");
+  if (!order) {
+    throw new Error("Order not found");
+  }
+  
+  // Push notifications are optional - if no subscription, skip silently
+  if (!order.subscription) {
+    console.log(`[Notification] No push subscription for order ${orderId}, using WebSocket only`);
+    return false;
   }
 
   const payload = JSON.stringify({
@@ -50,7 +56,7 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
 
   try {
     const notifType = notificationNumber > 1 ? `reminder ${notificationNumber}/3` : "notification";
-    console.log(`[Notification] Sending ${notifType} to order ${orderId}`);
+    console.log(`[Notification] Sending push ${notifType} to order ${orderId}`);
     await webPush.sendNotification(
       {
         endpoint: order.subscription.endpoint,
@@ -62,55 +68,55 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
       payload
     );
     
-    console.log(`[Notification] Successfully sent ${notifType} to order ${orderId}`);
+    console.log(`[Notification] Successfully sent push ${notifType} to order ${orderId}`);
     return true;
   } catch (error) {
-    console.error(`[Notification] Failed to send notification to order ${orderId}:`, error);
-    throw error;
+    console.error(`[Notification] Failed to send push notification to order ${orderId}:`, error);
+    return false;
   }
 }
 
-async function sendPushNotification(orderId: string, message?: string) {
-  try {
-    // Send first notification immediately
-    await sendSinglePushNotification(orderId, message, 1);
+async function sendNotification(orderId: string, message?: string) {
+  const order = await storage.getOrder(orderId);
+  if (!order) {
+    throw new Error("Order not found");
+  }
+
+  // Add message to order history
+  const notificationText = message || "Your order is ready for pickup!";
+  await storage.addMessage(orderId, notificationText);
+  
+  // Mark as notified
+  await storage.markOrderNotified(orderId);
+  
+  // Always notify WebSocket subscribers (works on all devices including iOS)
+  notifyOrderUpdate(orderId);
+  console.log(`[Notification] WebSocket notification sent for order ${orderId}`);
+  
+  // Try to send push notifications if subscription exists (optional, best-effort)
+  if (order.subscription) {
+    // Send first push notification immediately
+    sendSinglePushNotification(orderId, message, 1).catch(() => {});
     
-    // Add message to order history
-    const notificationText = message || "Your order is ready for pickup!";
-    await storage.addMessage(orderId, notificationText);
-    
-    // Send 2nd notification after 2 seconds
+    // Send 2nd push notification after 2 seconds
     setTimeout(() => {
-      sendSinglePushNotification(orderId, message, 2).catch(error => {
-        console.error("[Notification] 2nd reminder failed:", error);
-      });
+      sendSinglePushNotification(orderId, message, 2).catch(() => {});
     }, 2000);
     
-    // Send 3rd notification after 4 seconds
+    // Send 3rd push notification after 4 seconds
     setTimeout(() => {
-      sendSinglePushNotification(orderId, message, 3).catch(error => {
-        console.error("[Notification] 3rd reminder failed:", error);
-      });
+      sendSinglePushNotification(orderId, message, 3).catch(() => {});
     }, 4000);
-    
-    // Mark as notified after first notification
-    await storage.markOrderNotified(orderId);
-    
-    // Notify WebSocket subscribers for this order
-    notifyOrderUpdate(orderId);
-    
-    return true;
-  } catch (error) {
-    console.error(`[Notification] Failed to send notification to order ${orderId}:`, error);
-    throw error;
   }
+  
+  return true;
 }
 
 function scheduleNotification(orderId: string, scheduledDate: Date, message?: string) {
   const job = schedule.scheduleJob(scheduledDate, async () => {
     try {
       console.log(`[Schedule] Scheduled notification firing for order ${orderId} at ${new Date().toISOString()}`);
-      await sendPushNotification(orderId, message);
+      await sendNotification(orderId, message);
       scheduledJobs.delete(orderId);
     } catch (error) {
       console.error(`[Schedule] Scheduled notification failed for order ${orderId}:`, error);
@@ -224,6 +230,26 @@ export async function registerRoutes(
     }
   });
 
+  // Auto-register customer when they view the order page (no notification permission needed)
+  app.post("/api/orders/:id/register", async (req, res) => {
+    try {
+      const order = await storage.getOrder(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Only auto-register if still in "waiting" status
+      if (order.status === "waiting") {
+        const updatedOrder = await storage.updateOrderStatus(req.params.id, "subscribed");
+        res.json(updatedOrder);
+      } else {
+        res.json(order);
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to register" });
+    }
+  });
+
   app.post("/api/orders", async (req, res) => {
     try {
       const order = await storage.createOrder();
@@ -275,7 +301,7 @@ export async function registerRoutes(
   app.post("/api/orders/:id/trigger", async (req, res) => {
     try {
       const { message } = req.body || {};
-      await sendPushNotification(req.params.id, message);
+      await sendNotification(req.params.id, message);
       res.json({ success: true });
     } catch (error) {
       console.error("Trigger error:", error);
