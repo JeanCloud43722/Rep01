@@ -116,10 +116,11 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
   useEffect(() => {
     if (!order.scheduledTime || order.status !== "scheduled") return;
     
-    setRemainingTime(formatRemainingTime(order.scheduledTime));
+    const scheduledTime = order.scheduledTime;
+    setRemainingTime(formatRemainingTime(scheduledTime));
     
     const interval = setInterval(() => {
-      setRemainingTime(formatRemainingTime(order.scheduledTime));
+      setRemainingTime(formatRemainingTime(scheduledTime));
     }, 1000);
     
     return () => clearInterval(interval);
