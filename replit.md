@@ -44,6 +44,7 @@ MVP complete with all core features:
 | POST | `/api/orders/:id/register` | Auto-register customer (called when they visit) |
 | POST | `/api/orders/:id/subscribe` | Subscribe to push notifications (optional) |
 | POST | `/api/orders/:id/trigger` | Send immediate notification |
+| POST | `/api/orders/:id/message` | Send custom message (without marking order ready) |
 | POST | `/api/orders/:id/schedule` | Schedule future notification |
 | POST | `/api/orders/:id/service` | Request waiter service |
 | POST | `/api/orders/:id/offers` | Add offer to order |

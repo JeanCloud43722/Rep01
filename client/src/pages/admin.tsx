@@ -30,7 +30,8 @@ import {
   AlertCircle,
   Gift,
   Wrench,
-  Edit
+  Edit,
+  MessageSquare
 } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -83,7 +84,8 @@ function OrderCard({
   onSchedule, 
   onDelete,
   onAddOffer,
-  onEditNotes
+  onEditNotes,
+  onSendMessage
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
@@ -92,6 +94,7 @@ function OrderCard({
   onDelete: (orderId: string) => void;
   onAddOffer: (orderId: string) => void;
   onEditNotes: (orderId: string) => void;
+  onSendMessage: (orderId: string) => void;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   
@@ -162,6 +165,15 @@ function OrderCard({
               >
                 <Send className="h-4 w-4 mr-1" />
                 Notify Now
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => onSendMessage(order.id)}
+                data-testid={`button-message-${order.id}`}
+              >
+                <MessageSquare className="h-4 w-4 mr-1" />
+                Message
               </Button>
               <Button 
                 variant="outline" 
@@ -507,6 +519,73 @@ function NotifyModal({
   );
 }
 
+function MessageModal({
+  orderId,
+  open,
+  onClose,
+  onSendMessage
+}: {
+  orderId: string | null;
+  open: boolean;
+  onClose: () => void;
+  onSendMessage: (orderId: string, message: string) => void;
+}) {
+  const [message, setMessage] = useState("");
+  
+  const handleSubmit = () => {
+    if (orderId && message.trim()) {
+      onSendMessage(orderId, message);
+      onClose();
+      setMessage("");
+    }
+  };
+  
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      setMessage("");
+    }
+    onClose();
+  };
+  
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Send Message</DialogTitle>
+          <DialogDescription>
+            Send a custom message to the customer (without marking order as ready)
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="custom-message">Message</Label>
+            <Input
+              id="custom-message"
+              placeholder="e.g., Your order is almost ready..."
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              data-testid="input-custom-message"
+              maxLength={200}
+            />
+            <p className="text-xs text-muted-foreground">
+              {message.length}/200 characters
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} disabled={!message.trim()} data-testid="button-confirm-message">
+              <MessageSquare className="h-4 w-4 mr-1" />
+              Send Message
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ScheduleModal({
   orderId,
   open,
@@ -641,6 +720,7 @@ export default function AdminPage() {
   const { toast } = useToast();
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [notifyOrderId, setNotifyOrderId] = useState<string | null>(null);
+  const [messageOrderId, setMessageOrderId] = useState<string | null>(null);
   const [scheduleOrderId, setScheduleOrderId] = useState<string | null>(null);
   const [offerOrderId, setOfferOrderId] = useState<string | null>(null);
   const [notesOrderId, setNotesOrderId] = useState<string | null>(null);
@@ -704,6 +784,25 @@ export default function AdminPage() {
       });
     }
   });
+
+  const messageMutation = useMutation({
+    mutationFn: ({ orderId, message }: { orderId: string; message: string }) => 
+      apiRequest("POST", `/api/orders/${orderId}/message`, { message }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({
+        title: "Message sent",
+        description: "Customer has received your message"
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to send message",
+        variant: "destructive"
+      });
+    }
+  });
   
   const scheduleMutation = useMutation({
     mutationFn: ({ orderId, scheduledTime, message }: { orderId: string; scheduledTime: string; message: string }) => 
@@ -734,6 +833,10 @@ export default function AdminPage() {
   
   const handleSchedule = (orderId: string, scheduledTime: string, message: string) => {
     scheduleMutation.mutate({ orderId, scheduledTime, message });
+  };
+
+  const handleSendMessage = (orderId: string, message: string) => {
+    messageMutation.mutate({ orderId, message });
   };
 
   const addOfferMutation = useMutation({
@@ -848,6 +951,7 @@ export default function AdminPage() {
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
                     onAddOffer={setOfferOrderId}
                     onEditNotes={setNotesOrderId}
+                    onSendMessage={setMessageOrderId}
                   />
                 ))}
               </div>
@@ -871,6 +975,7 @@ export default function AdminPage() {
                     onDelete={(id) => deleteOrderMutation.mutate(id)}
                     onAddOffer={setOfferOrderId}
                     onEditNotes={setNotesOrderId}
+                    onSendMessage={setMessageOrderId}
                   />
                 ))}
               </div>
@@ -890,6 +995,13 @@ export default function AdminPage() {
         open={!!notifyOrderId}
         onClose={() => setNotifyOrderId(null)}
         onNotify={handleNotify}
+      />
+
+      <MessageModal
+        orderId={messageOrderId}
+        open={!!messageOrderId}
+        onClose={() => setMessageOrderId(null)}
+        onSendMessage={handleSendMessage}
       />
       
       <ScheduleModal

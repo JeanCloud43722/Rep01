@@ -309,6 +309,34 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/:id/message", async (req, res) => {
+    try {
+      const messageSchema = z.object({
+        message: z.string().min(1).max(200)
+      });
+      
+      const { message } = messageSchema.parse(req.body);
+      
+      const order = await storage.getOrder(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      await storage.addMessage(req.params.id, message);
+      
+      notifyOrderUpdate(req.params.id);
+      console.log(`[Message] Sent message to order ${req.params.id}: ${message}`);
+      
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid message" });
+      }
+      console.error("Message error:", error);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
   app.post("/api/orders/:id/schedule", async (req, res) => {
     try {
       const scheduleSchema = z.object({
