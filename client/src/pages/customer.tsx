@@ -77,32 +77,36 @@ function formatRemainingTime(scheduledTime: string): string {
   return `${minutes}m ${seconds}s remaining`;
 }
 
-function playReadySound() {
+function playNotificationSound() {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     const now = audioContext.currentTime;
     
-    // Create oscillators for a pleasant alert sound
-    const osc1 = audioContext.createOscillator();
-    const osc2 = audioContext.createOscillator();
-    const gain = audioContext.createGain();
+    // Classic notification chime - two ascending tones like typical message sounds
+    const notes = [
+      { freq: 587.33, start: 0, duration: 0.15 },      // D5
+      { freq: 880, start: 0.15, duration: 0.25 }       // A5 (higher, longer)
+    ];
     
-    osc1.frequency.value = 800;
-    osc2.frequency.value = 600;
-    osc1.type = "sine";
-    osc2.type = "sine";
-    
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-    
-    osc1.connect(gain);
-    osc2.connect(gain);
-    gain.connect(audioContext.destination);
-    
-    osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + 0.3);
-    osc2.stop(now + 0.3);
+    notes.forEach(({ freq, start, duration }) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.type = "sine";
+      oscillator.frequency.value = freq;
+      
+      // Smooth envelope for pleasant sound
+      gainNode.gain.setValueAtTime(0, now + start);
+      gainNode.gain.linearRampToValueAtTime(0.4, now + start + 0.02);
+      gainNode.gain.setValueAtTime(0.4, now + start + duration - 0.05);
+      gainNode.gain.linearRampToValueAtTime(0, now + start + duration);
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.start(now + start);
+      oscillator.stop(now + start + duration);
+    });
   } catch (error) {
     console.error("Failed to play sound:", error);
   }
@@ -290,7 +294,7 @@ export default function CustomerPage() {
           const message = JSON.parse(event.data);
           if (message.type === "order_updated") {
             // Play audio alert when order is updated
-            playReadySound();
+            playNotificationSound();
             // Refetch the order data immediately
             queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
           }
