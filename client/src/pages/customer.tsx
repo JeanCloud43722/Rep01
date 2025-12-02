@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -15,7 +15,8 @@ import {
   CheckCircle2,
   Calendar,
   Send,
-  Gift
+  Gift,
+  Bell
 } from "lucide-react";
 
 function getStatusConfig(status: Order["status"]) {
@@ -228,12 +229,52 @@ export default function CustomerPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
   const [hasRegistered, setHasRegistered] = useState(false);
+  const [hasNewMessage, setHasNewMessage] = useState(false);
+  const [newMessageId, setNewMessageId] = useState<string | null>(null);
+  const lastMessageCountRef = useRef<number>(0);
+  const messagesCardRef = useRef<HTMLDivElement>(null);
   
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
     refetchInterval: 4000
   });
+  
+  // Track new messages and trigger animation
+  useEffect(() => {
+    if (order && order.messages.length > lastMessageCountRef.current) {
+      // New message(s) received
+      if (lastMessageCountRef.current > 0) {
+        setHasNewMessage(true);
+        // Get the newest message ID for highlighting
+        const newestMessage = order.messages[order.messages.length - 1];
+        if (newestMessage) {
+          setNewMessageId(newestMessage.id);
+        }
+      }
+      lastMessageCountRef.current = order.messages.length;
+    }
+  }, [order?.messages.length]);
+  
+  // Reset animation when user scrolls to messages section
+  useEffect(() => {
+    if (!hasNewMessage || !messagesCardRef.current) return;
+    
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          // User can see the messages, reset indicator after a short delay
+          setTimeout(() => {
+            setHasNewMessage(false);
+          }, 2000);
+        }
+      },
+      { threshold: 0.5 }
+    );
+    
+    observer.observe(messagesCardRef.current);
+    return () => observer.disconnect();
+  }, [hasNewMessage]);
   
   // Auto-register customer when they visit the page (no button click needed)
   const registerMutation = useMutation({
@@ -334,10 +375,21 @@ export default function CustomerPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="max-w-md w-full space-y-6">
-        <div className="text-center space-y-2">
-          <Badge variant="outline" className="font-mono text-sm px-3 py-1" data-testid="badge-order-id">
-            Order #{order.id}
-          </Badge>
+        <div className="text-center space-y-2 relative">
+          <div className="flex items-center justify-center gap-2">
+            <Badge variant="outline" className="font-mono text-sm px-3 py-1" data-testid="badge-order-id">
+              Order #{order.id}
+            </Badge>
+            {hasNewMessage && (
+              <div 
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium animate-pulse-glow"
+                data-testid="indicator-new-message"
+              >
+                <Bell className="h-3 w-3" />
+                <span>New</span>
+              </div>
+            )}
+          </div>
           <h1 className="text-2xl font-bold">Your Order Status</h1>
           <p className="text-muted-foreground">
             {formatTime(order.createdAt)} • Track your order here
@@ -347,19 +399,36 @@ export default function CustomerPage() {
         <SubscribedCard order={order} onRequestService={handleRequestService} isRequestingService={serviceRequestMutation.isPending} />
         
         {order.messages.length > 0 && (
-          <Card>
+          <Card ref={messagesCardRef}>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Send className="h-4 w-4" />
                 Messages ({order.messages.length})
+                {hasNewMessage && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {order.messages.map((msg) => (
-                  <div key={msg.id} className="border-l-2 border-primary pl-3 py-2" data-testid={`message-item-${msg.id}`}>
+                {[...order.messages].reverse().map((msg, index) => (
+                  <div 
+                    key={msg.id} 
+                    className={`border-l-2 pl-3 py-2 transition-all duration-500 ${
+                      msg.id === newMessageId && hasNewMessage 
+                        ? "border-primary bg-primary/5 animate-fade-in-highlight" 
+                        : "border-primary/50"
+                    }`}
+                    data-testid={`message-item-${msg.id}`}
+                  >
                     <p className="text-sm text-foreground">{msg.text}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{formatTime(msg.sentAt)}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {formatTime(msg.sentAt)}
+                      {index === 0 && <span className="ml-2 text-primary font-medium">Latest</span>}
+                    </p>
                   </div>
                 ))}
               </div>
