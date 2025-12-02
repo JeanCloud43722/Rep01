@@ -78,15 +78,16 @@ function formatRemainingTime(scheduledTime: string): string {
   return `${minutes}m ${seconds}s remaining`;
 }
 
-function playNotificationSound() {
+// Gentle chime for incoming messages from staff
+function playMessageChime() {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     const now = audioContext.currentTime;
     
-    // Classic notification chime - two ascending tones like typical message sounds
+    // Soft two-tone ascending chime
     const notes = [
-      { freq: 587.33, start: 0, duration: 0.15 },      // D5
-      { freq: 880, start: 0.15, duration: 0.25 }       // A5 (higher, longer)
+      { freq: 523.25, start: 0, duration: 0.12 },      // C5
+      { freq: 659.25, start: 0.12, duration: 0.18 }    // E5 (gentle ascent)
     ];
     
     notes.forEach(({ freq, start, duration }) => {
@@ -96,10 +97,9 @@ function playNotificationSound() {
       oscillator.type = "sine";
       oscillator.frequency.value = freq;
       
-      // Smooth envelope for pleasant sound
       gainNode.gain.setValueAtTime(0, now + start);
-      gainNode.gain.linearRampToValueAtTime(0.4, now + start + 0.02);
-      gainNode.gain.setValueAtTime(0.4, now + start + duration - 0.05);
+      gainNode.gain.linearRampToValueAtTime(0.25, now + start + 0.02);
+      gainNode.gain.setValueAtTime(0.25, now + start + duration - 0.04);
       gainNode.gain.linearRampToValueAtTime(0, now + start + duration);
       
       oscillator.connect(gainNode);
@@ -109,7 +109,58 @@ function playNotificationSound() {
       oscillator.stop(now + start + duration);
     });
   } catch (error) {
-    console.error("Failed to play sound:", error);
+    console.error("Failed to play message chime:", error);
+  }
+}
+
+// Urgent buzzer sound for order ready - attention-grabbing
+function playOrderReadyBuzzer() {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = audioContext.currentTime;
+    
+    // Three-pulse buzzer pattern with harmonic overlay
+    const pulses = [
+      { start: 0, duration: 0.15 },
+      { start: 0.25, duration: 0.15 },
+      { start: 0.5, duration: 0.3 }
+    ];
+    
+    pulses.forEach(({ start, duration }) => {
+      // Primary tone - sawtooth for buzzer character
+      const osc1 = audioContext.createOscillator();
+      const gain1 = audioContext.createGain();
+      osc1.type = "sawtooth";
+      osc1.frequency.value = 440; // A4
+      
+      gain1.gain.setValueAtTime(0, now + start);
+      gain1.gain.linearRampToValueAtTime(0.3, now + start + 0.02);
+      gain1.gain.setValueAtTime(0.3, now + start + duration - 0.03);
+      gain1.gain.linearRampToValueAtTime(0, now + start + duration);
+      
+      osc1.connect(gain1);
+      gain1.connect(audioContext.destination);
+      osc1.start(now + start);
+      osc1.stop(now + start + duration);
+      
+      // Harmonic overlay - square wave for presence
+      const osc2 = audioContext.createOscillator();
+      const gain2 = audioContext.createGain();
+      osc2.type = "square";
+      osc2.frequency.value = 880; // A5 (octave up)
+      
+      gain2.gain.setValueAtTime(0, now + start);
+      gain2.gain.linearRampToValueAtTime(0.1, now + start + 0.02);
+      gain2.gain.setValueAtTime(0.1, now + start + duration - 0.03);
+      gain2.gain.linearRampToValueAtTime(0, now + start + duration);
+      
+      osc2.connect(gain2);
+      gain2.connect(audioContext.destination);
+      osc2.start(now + start);
+      osc2.stop(now + start + duration);
+    });
+  } catch (error) {
+    console.error("Failed to play order ready buzzer:", error);
   }
 }
 
@@ -334,8 +385,14 @@ export default function CustomerPage() {
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
           if (message.type === "order_updated") {
-            // Play audio alert when order is updated
-            playNotificationSound();
+            // Play appropriate sound based on event type
+            if (message.eventType === "order_ready") {
+              playOrderReadyBuzzer();
+            } else if (message.eventType === "message") {
+              playMessageChime();
+            } else if (message.eventType === "offer") {
+              playMessageChime();
+            }
             // Refetch the order data immediately
             queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
           }

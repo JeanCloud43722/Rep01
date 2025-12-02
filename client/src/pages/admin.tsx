@@ -77,6 +77,67 @@ function formatDate(isoString: string) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// Alert sound for staff when customer requests service (Call Waiter)
+function playServiceRequestAlert() {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = audioContext.currentTime;
+    
+    // Attention-grabbing staccato alert - three quick descending tones
+    const tones = [
+      { freq: 880, start: 0, duration: 0.1 },        // A5
+      { freq: 698.46, start: 0.15, duration: 0.1 },  // F5
+      { freq: 523.25, start: 0.3, duration: 0.15 }   // C5
+    ];
+    
+    tones.forEach(({ freq, start, duration }) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.type = "triangle";
+      oscillator.frequency.value = freq;
+      
+      gainNode.gain.setValueAtTime(0, now + start);
+      gainNode.gain.linearRampToValueAtTime(0.4, now + start + 0.02);
+      gainNode.gain.setValueAtTime(0.4, now + start + duration - 0.03);
+      gainNode.gain.linearRampToValueAtTime(0, now + start + duration);
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.start(now + start);
+      oscillator.stop(now + start + duration);
+    });
+    
+    // Second alert after short pause for emphasis
+    setTimeout(() => {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const t = ctx.currentTime;
+      
+      tones.forEach(({ freq, start, duration }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        
+        gain.gain.setValueAtTime(0, t + start);
+        gain.gain.linearRampToValueAtTime(0.35, t + start + 0.02);
+        gain.gain.setValueAtTime(0.35, t + start + duration - 0.03);
+        gain.gain.linearRampToValueAtTime(0, t + start + duration);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(t + start);
+        osc.stop(t + start + duration);
+      });
+    }, 600);
+  } catch (error) {
+    console.error("Failed to play service request alert:", error);
+  }
+}
+
 function OrderCard({ 
   order, 
   onShowQR, 
@@ -729,6 +790,61 @@ export default function AdminPage() {
     queryKey: ["/api/orders"],
     refetchInterval: 4000
   });
+  
+  // Connect to admin WebSocket for real-time service request alerts
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/admin`;
+    
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
+    
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log("Connected to admin updates");
+        };
+        
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "admin_update") {
+            // Play alert for service requests (waiter button)
+            if (message.eventType === "service_request") {
+              playServiceRequestAlert();
+              toast({
+                title: "Service Request",
+                description: `Order ${message.orderId} needs assistance`,
+                variant: "destructive"
+              });
+            }
+            // Refetch orders to get latest data
+            queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+          }
+        };
+        
+        ws.onclose = () => {
+          reconnectTimeout = setTimeout(connect, 3000);
+        };
+        
+        ws.onerror = () => {
+          console.error("Admin WebSocket error");
+          ws?.close();
+        };
+      } catch (error) {
+        console.error("Failed to connect to admin WebSocket:", error);
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+    
+    connect();
+    
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) ws.close();
+    };
+  }, [toast]);
   
   const createOrderMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/orders"),

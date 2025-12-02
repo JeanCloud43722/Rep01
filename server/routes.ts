@@ -36,6 +36,12 @@ const scheduledJobs = new Map<string, schedule.Job>();
 // WebSocket client tracking per order
 const orderSubscribers = new Map<string, Set<any>>();
 
+// WebSocket client tracking for admin dashboard
+const adminSubscribers = new Set<any>();
+
+// Event types for differentiated notifications
+type OrderEventType = "message" | "order_ready" | "service_request" | "offer" | "status_update";
+
 async function sendSinglePushNotification(orderId: string, message?: string, notificationNumber: number = 1) {
   const order = await storage.getOrder(orderId);
   if (!order) {
@@ -90,7 +96,8 @@ async function sendNotification(orderId: string, message?: string) {
   await storage.markOrderNotified(orderId);
   
   // Always notify WebSocket subscribers (works on all devices including iOS)
-  notifyOrderUpdate(orderId);
+  notifyOrderUpdate(orderId, "order_ready");
+  notifyAdminUpdate(orderId, "order_ready");
   console.log(`[Notification] WebSocket notification sent for order ${orderId}`);
   
   // Try to send push notifications if subscription exists (optional, best-effort)
@@ -133,16 +140,25 @@ function scheduleNotification(orderId: string, scheduledDate: Date, message?: st
   return job;
 }
 
-function notifyOrderUpdate(orderId: string) {
+function notifyOrderUpdate(orderId: string, eventType: OrderEventType = "status_update") {
   const subscribers = orderSubscribers.get(orderId);
   if (subscribers) {
-    const message = JSON.stringify({ type: "order_updated" });
+    const message = JSON.stringify({ type: "order_updated", eventType, orderId });
     subscribers.forEach((ws) => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(message);
       }
     });
   }
+}
+
+function notifyAdminUpdate(orderId: string, eventType: OrderEventType) {
+  const message = JSON.stringify({ type: "admin_update", eventType, orderId });
+  adminSubscribers.forEach((ws) => {
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(message);
+    }
+  });
 }
 
 async function restoreScheduledNotifications() {
@@ -175,10 +191,12 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/orders" });
+  const adminWss = new WebSocketServer({ server: httpServer, path: "/ws/admin" });
   
   // Restore scheduled notifications on startup
   await restoreScheduledNotifications();
   
+  // Customer order WebSocket connections
   wss.on("connection", (ws, req) => {
     const url = req.url;
     const orderId = url?.split("?id=")[1];
@@ -202,6 +220,17 @@ export async function registerRoutes(
           orderSubscribers.delete(orderId);
         }
       }
+    });
+  });
+  
+  // Admin dashboard WebSocket connections
+  adminWss.on("connection", (ws) => {
+    adminSubscribers.add(ws);
+    console.log("[WebSocket] Admin client connected");
+    
+    ws.on("close", () => {
+      adminSubscribers.delete(ws);
+      console.log("[WebSocket] Admin client disconnected");
     });
   });
   
@@ -324,7 +353,8 @@ export async function registerRoutes(
       
       await storage.addMessage(req.params.id, message);
       
-      notifyOrderUpdate(req.params.id);
+      notifyOrderUpdate(req.params.id, "message");
+      notifyAdminUpdate(req.params.id, "message");
       console.log(`[Message] Sent message to order ${req.params.id}: ${message}`);
       
       res.json({ success: true });
@@ -394,7 +424,8 @@ export async function registerRoutes(
       }
       
       // Notify WebSocket subscribers
-      notifyOrderUpdate(req.params.id);
+      notifyOrderUpdate(req.params.id, "offer");
+      notifyAdminUpdate(req.params.id, "offer");
       
       res.json(order);
     } catch (error) {
@@ -412,8 +443,9 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Order not found" });
       }
       
-      // Notify WebSocket subscribers
-      notifyOrderUpdate(req.params.id);
+      // Notify WebSocket subscribers - service_request for admin alert
+      notifyOrderUpdate(req.params.id, "service_request");
+      notifyAdminUpdate(req.params.id, "service_request");
       
       res.json(order);
     } catch (error) {

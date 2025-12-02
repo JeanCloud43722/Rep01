@@ -102,9 +102,22 @@ npm run dev  # Start development server on port 5000
 ## Notification System
 The system uses a hybrid approach for maximum compatibility:
 - **WebSocket**: Real-time updates work on all devices including iOS Safari
+  - Customer WebSocket: `/ws/orders?id=:orderId` for order-specific updates
+  - Admin WebSocket: `/ws/admin` for staff notifications
 - **Push Notifications**: Optional enhancement for browsers that support web push
-- **Audio Alerts**: Sound plays when order status changes
+- **Acoustic Alerts**: Distinct sounds for different events:
+  - **Message Chime** (customer): Gentle two-tone ascending chime (C5 → E5) for incoming messages
+  - **Order Ready Buzzer** (customer): Attention-grabbing three-pulse sawtooth buzzer for order ready
+  - **Service Request Alert** (staff): Descending staccato tones (A5 → F5 → C5) when customer calls waiter
 - **Polling**: Fallback polling every 4 seconds ensures updates are never missed
+
+## Event Types
+The WebSocket sends typed events for differentiated responses:
+- `order_ready`: Order is ready for pickup
+- `message`: Staff sent a custom message
+- `service_request`: Customer pressed "Call Waiter"
+- `offer`: Special offer added to order
+- `status_update`: General status change
 
 ## Known Limitations
 - Data is stored in-memory and will be lost on server restart (for demo purposes)
