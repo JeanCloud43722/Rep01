@@ -4,6 +4,76 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { audioManager } from "@/lib/audio-manager";
 import type { Order } from "@shared/schema";
+
+// Audio utilities for reliable sounds across all devices
+const playBuzzer = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+    
+    gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    
+    oscillator.start(audioCtx.currentTime);
+    oscillator.stop(audioCtx.currentTime + 0.2);
+    
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      gainNode.disconnect();
+      audioCtx.close();
+    };
+  } catch (e) {
+    console.log('[Audio] Buzzer failed:', e);
+  }
+};
+
+const playMessageSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    
+    // Classic two-tone message chime (like iMessage or notification)
+    const playTone = (freq: number, startTime: number, duration: number) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+      
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+      
+      return { osc, gain };
+    };
+    
+    // Two ascending tones - classic message sound
+    const t1 = playTone(880, now, 0.15);        // A5
+    const t2 = playTone(1108, now + 0.12, 0.2); // C#6
+    
+    t2.osc.onended = () => {
+      t1.osc.disconnect(); t1.gain.disconnect();
+      t2.osc.disconnect(); t2.gain.disconnect();
+      audioCtx.close();
+    };
+  } catch (e) {
+    console.log('[Audio] Message sound failed:', e);
+  }
+};
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -162,7 +232,10 @@ function OrderCard({
             <>
               <Button 
                 size="sm" 
-                onClick={() => onTrigger(order.id)}
+                onClick={() => {
+                  playBuzzer();
+                  onTrigger(order.id);
+                }}
                 data-testid={`button-notify-${order.id}`}
               >
                 <Send className="h-4 w-4 mr-1" />
@@ -468,44 +541,8 @@ function NotifyModal({
   const DEFAULT_MESSAGE = "Your order is ready for pickup!";
   const [message, setMessage] = useState(DEFAULT_MESSAGE);
   
-  // Play a loud, unmistakable buzzer sound using Web Audio API
-  const playBuzzer = () => {
-    try {
-      const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      
-      // Create a loud 800Hz square wave buzzer - ~200ms
-      const oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      
-      oscillator.type = 'square'; // Square wave for loud, digital buzzer sound
-      oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
-      
-      // Start loud and decay slightly for a clean buzzer effect
-      gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
-      
-      oscillator.start(audioCtx.currentTime);
-      oscillator.stop(audioCtx.currentTime + 0.2);
-      
-      // Cleanup after sound finishes
-      oscillator.onended = () => {
-        oscillator.disconnect();
-        gainNode.disconnect();
-        audioCtx.close();
-      };
-    } catch (e) {
-      // Fail silently - audio not critical
-      console.log('[Buzzer] Audio playback failed:', e);
-    }
-  };
-  
   const handleSubmit = () => {
     if (orderId) {
-      // Play buzzer directly in click handler for autoplay compliance
       playBuzzer();
       onNotify(orderId, message);
       onClose();
@@ -573,6 +610,7 @@ function MessageModal({
   
   const handleSubmit = () => {
     if (orderId && message.trim()) {
+      playMessageSound();
       onSendMessage(orderId, message);
       onClose();
       setMessage("");
@@ -642,6 +680,7 @@ function ScheduleModal({
   
   const handleSubmit = () => {
     if (orderId && scheduledTime) {
+      playBuzzer();
       // Convert local datetime to ISO string for backend
       // datetime-local input returns "2025-12-01T21:00"
       // We need to convert it to proper ISO format
