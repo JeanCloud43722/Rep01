@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useNotificationOrchestrator } from "@/lib/notification-orchestrator";
+import { audioManager } from "@/lib/audio-manager";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -728,22 +728,36 @@ export default function AdminPage() {
   const [notesOrderId, setNotesOrderId] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
   
-  const { warmUp, notify, setRole, getDeviceInfo, getCapabilitySummary } = useNotificationOrchestrator();
-  
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
     refetchInterval: 4000
   });
   
-  // Set role as staff for this page
-  useEffect(() => {
-    setRole('staff');
-  }, []);
+  const playStaffSound = (type: 'service_request' | 'new_registration' | 'order_completed') => {
+    console.log(`[Admin Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabled}`);
+    if (!audioEnabled) {
+      console.log('[Admin Audio] Sound not enabled yet');
+      return;
+    }
+    
+    switch (type) {
+      case 'service_request':
+        audioManager.play('service-request');
+        break;
+      case 'new_registration':
+        audioManager.play('new-registration');
+        break;
+      case 'order_completed':
+        audioManager.play('order-completed');
+        break;
+    }
+  };
   
-  // Enable audio with user interaction
   const enableAudio = () => {
-    warmUp();
+    console.log('[Admin Audio] Enabling audio...');
+    audioManager.warmUp();
     setAudioEnabled(true);
+    audioManager.play('status-update');
   };
   
   // Connect to admin WebSocket for real-time service request alerts
@@ -764,17 +778,19 @@ export default function AdminPage() {
         
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
+          console.log("[Admin WS] Received:", message);
+          
           if (message.type === "admin_update") {
-            // Use notification orchestrator for audio/haptic feedback
             const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed';
             if (eventType) {
-              notify({
-                type: eventType,
-                orderId: message.orderId
-              });
+              console.log(`[Admin WS] Playing sound for event: ${eventType}`);
+              playStaffSound(eventType);
+              
+              if (navigator.vibrate) {
+                navigator.vibrate([200, 100, 200]);
+              }
             }
             
-            // Show toast for service requests
             if (message.eventType === "service_request") {
               toast({
                 title: "Service Request",
@@ -788,7 +804,6 @@ export default function AdminPage() {
               });
             }
             
-            // Refetch orders to get latest data
             queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
           }
         };
@@ -813,7 +828,7 @@ export default function AdminPage() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [toast, notify]);
+  }, [toast, audioEnabled]);
   
   const createOrderMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/orders"),

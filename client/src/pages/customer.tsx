@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useNotificationOrchestrator } from "@/lib/notification-orchestrator";
+import { audioManager } from "@/lib/audio-manager";
+import { detectCapabilities } from "@/lib/device-capabilities";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -21,6 +22,17 @@ import {
   Smartphone,
   Volume2
 } from "lucide-react";
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
 
 function getStatusConfig(status: Order["status"]) {
   switch (status) {
@@ -200,10 +212,11 @@ export default function CustomerPage() {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState("");
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
-  
-  const { warmUp, notify, setRole, getCapabilities, getDeviceInfo, getCapabilitySummary, requestWakeLock } = useNotificationOrchestrator();
+  const capabilities = detectCapabilities();
   
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
@@ -211,25 +224,98 @@ export default function CustomerPage() {
     refetchInterval: 4000
   });
   
-  // Set role and initialize orchestrator
   useEffect(() => {
-    setRole('customer');
+    const info = capabilities.isIOS ? "iOS" : capabilities.isAndroid ? "Android" : "Desktop";
+    setDeviceInfo(info);
   }, []);
   
-  // Enable audio with user interaction - required for iOS Safari
-  const enableAudio = () => {
-    warmUp();
-    setAudioEnabled(true);
-    requestWakeLock();
+  const playSound = (type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
+    console.log(`[Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabled}`);
+    if (!audioEnabled) {
+      console.log('[Audio] Sound not enabled yet');
+      return;
+    }
+    
+    switch (type) {
+      case 'order_ready':
+        audioManager.play('order-ready');
+        break;
+      case 'message':
+        audioManager.play('message');
+        break;
+      case 'offer':
+        audioManager.play('offer');
+        break;
+      case 'status_update':
+        audioManager.play('status-update');
+        break;
+    }
   };
   
-  // Track new messages and trigger animation
+  const enableAudio = () => {
+    console.log('[Audio] Enabling audio...');
+    audioManager.warmUp();
+    setAudioEnabled(true);
+    audioManager.play('status-update');
+  };
+  
+  const subscribeToPush = async () => {
+    if (!orderId) return;
+    
+    try {
+      console.log('[Push] Starting push subscription...');
+      
+      if (!("Notification" in window)) {
+        console.log('[Push] Notifications not supported');
+        return;
+      }
+      
+      const permission = await Notification.requestPermission();
+      console.log('[Push] Permission:', permission);
+      
+      if (permission !== "granted") {
+        console.log('[Push] Permission denied');
+        return;
+      }
+      
+      const vapidResponse = await fetch("/api/vapid-public-key");
+      const { publicKey } = await vapidResponse.json();
+      console.log('[Push] Got VAPID key');
+      
+      const registration = await navigator.serviceWorker.ready;
+      console.log('[Push] Service worker ready');
+      
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+      
+      console.log('[Push] Got subscription:', subscription.endpoint);
+      
+      await apiRequest("POST", `/api/orders/${orderId}/subscribe`, {
+        subscription: subscription.toJSON()
+      });
+      
+      console.log('[Push] Subscription saved');
+      setPushEnabled(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+    } catch (error) {
+      console.error('[Push] Subscription failed:', error);
+    }
+  };
+  
+  const enableNotifications = async () => {
+    enableAudio();
+    
+    if (capabilities.pushNotifications && !capabilities.isIOS) {
+      await subscribeToPush();
+    }
+  };
+  
   useEffect(() => {
     if (order && order.messages.length > lastMessageCountRef.current) {
-      // New message(s) received
       if (lastMessageCountRef.current > 0) {
         setHasNewMessage(true);
-        // Get the newest message ID for highlighting
         const newestMessage = order.messages[order.messages.length - 1];
         if (newestMessage) {
           setNewMessageId(newestMessage.id);
@@ -239,14 +325,12 @@ export default function CustomerPage() {
     }
   }, [order?.messages.length]);
   
-  // Reset animation when user scrolls to messages section
   useEffect(() => {
     if (!hasNewMessage || !messagesCardRef.current) return;
     
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          // User can see the messages, reset indicator after a short delay
           setTimeout(() => {
             setHasNewMessage(false);
           }, 2000);
@@ -259,7 +343,6 @@ export default function CustomerPage() {
     return () => observer.disconnect();
   }, [hasNewMessage]);
   
-  // Auto-register customer when they visit the page (no button click needed)
   const registerMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("POST", `/api/orders/${orderId}/register`);
@@ -280,10 +363,12 @@ export default function CustomerPage() {
   });
   
   const handleRequestService = () => {
+    if (!audioEnabled) {
+      enableAudio();
+    }
     serviceRequestMutation.mutate();
   };
   
-  // Auto-register when order is loaded and still in "waiting" status
   useEffect(() => {
     if (order && order.status === "waiting" && !hasRegistered && !registerMutation.isPending) {
       registerMutation.mutate();
@@ -299,7 +384,6 @@ export default function CustomerPage() {
   useEffect(() => {
     if (!orderId) return;
     
-    // Connect to WebSocket for real-time updates
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws/orders?id=${orderId}`;
     
@@ -311,38 +395,37 @@ export default function CustomerPage() {
         ws = new WebSocket(wsUrl);
         
         ws.onopen = () => {
-          console.log("Connected to order updates");
+          console.log("[WS] Connected to order updates");
         };
         
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
+          console.log("[WS] Received:", message);
+          
           if (message.type === "order_updated") {
-            // Use notification orchestrator for audio/haptic/visual feedback
             const eventType = message.eventType as 'order_ready' | 'message' | 'offer' | 'status_update';
             if (eventType) {
-              notify({
-                type: eventType,
-                orderId: orderId,
-                title: message.title,
-                body: message.body
-              });
+              console.log(`[WS] Playing sound for event: ${eventType}`);
+              playSound(eventType);
+              
+              if (navigator.vibrate && eventType === 'order_ready') {
+                navigator.vibrate([200, 100, 200, 100, 200]);
+              }
             }
-            // Refetch the order data immediately
             queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
           }
         };
         
         ws.onclose = () => {
-          // Attempt to reconnect after 3 seconds
           reconnectTimeout = setTimeout(connect, 3000);
         };
         
         ws.onerror = () => {
-          console.error("WebSocket error");
+          console.error("[WS] WebSocket error");
           ws?.close();
         };
       } catch (error) {
-        console.error("Failed to connect to WebSocket:", error);
+        console.error("[WS] Failed to connect:", error);
         reconnectTimeout = setTimeout(connect, 3000);
       }
     };
@@ -353,7 +436,7 @@ export default function CustomerPage() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [orderId]);
+  }, [orderId, audioEnabled]);
   
   if (isLoading) {
     return <LoadingState />;
@@ -449,26 +532,27 @@ export default function CustomerPage() {
           </Card>
         )}
         
-        {/* Enable Sound button for iOS Safari and other devices that require user interaction */}
         {!audioEnabled && (
           <Card className="border-primary/20 bg-primary/5">
             <CardContent className="py-4">
               <div className="flex flex-col items-center gap-3">
                 <div className="flex items-center gap-2 text-sm">
                   <Volume2 className="h-4 w-4 text-primary" />
-                  <span>Enable sound alerts for notifications</span>
+                  <span>Enable notifications for this order</span>
                 </div>
                 <Button 
-                  onClick={enableAudio}
+                  onClick={enableNotifications}
                   variant="default"
                   size="sm"
                   data-testid="button-enable-audio"
                 >
-                  <Volume2 className="h-4 w-4 mr-2" />
-                  Enable Sound
+                  <Bell className="h-4 w-4 mr-2" />
+                  Enable Notifications
                 </Button>
                 <p className="text-xs text-muted-foreground text-center">
-                  Tap to receive audio alerts when your order is ready
+                  {capabilities.pushNotifications && !capabilities.isIOS 
+                    ? "Receive sound and push notifications when your order is ready"
+                    : "Receive sound alerts when your order is ready"}
                 </p>
               </div>
             </CardContent>
@@ -478,9 +562,15 @@ export default function CustomerPage() {
         {audioEnabled && (
           <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <Smartphone className="h-3 w-3" />
-            <span>{getDeviceInfo()}</span>
+            <span>{deviceInfo}</span>
             <span>•</span>
-            <span>{getCapabilitySummary().join(', ')}</span>
+            <span className="text-green-600">Sound enabled</span>
+            {pushEnabled && (
+              <>
+                <span>•</span>
+                <span className="text-green-600">Push enabled</span>
+              </>
+            )}
           </div>
         )}
         
