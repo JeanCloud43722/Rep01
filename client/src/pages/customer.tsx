@@ -213,13 +213,14 @@ export default function CustomerPage() {
   const [hasRegistered, setHasRegistered] = useState(false);
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
-  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true); // Start as enabled
   const [pushEnabled, setPushEnabled] = useState(false);
   const [audioFailed, setAudioFailed] = useState(false);
-  const audioEnabledRef = useRef(false);
+  const audioEnabledRef = useRef(true); // Start as enabled
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
   const hasShownAudioWarning = useRef(false);
+  const hasInitializedRef = useRef(false);
   const capabilities = detectCapabilities();
   
   const { data: order, isLoading, error } = useQuery<Order>({
@@ -229,22 +230,15 @@ export default function CustomerPage() {
   });
   
   const enableAudio = useCallback(() => {
-    if (audioEnabledRef.current) return;
+    if (audioEnabledRef.current && !audioFailed) return;
     
-    console.log('[Audio] Auto-enabling audio on user interaction...');
+    console.log('[Audio] Enabling audio...');
     audioManager.warmUp();
     audioEnabledRef.current = true;
     setAudioEnabled(true);
     setAudioFailed(false);
     hasShownAudioWarning.current = false;
-    
-    // Play a brief confirmation sound
-    audioManager.play('status-update');
-    
-    if (capabilities.pushNotifications && !capabilities.isIOS) {
-      subscribeToPush();
-    }
-  }, []);
+  }, [audioFailed]);
   
   const subscribeToPush = async () => {
     if (!orderId) return;
@@ -294,18 +288,9 @@ export default function CustomerPage() {
   const playSound = useCallback((type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
     console.log(`[Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabledRef.current}`);
     
-    // If audio not enabled, show a warning toast once
+    // If audio context needs warmup, try now
     if (!audioEnabledRef.current) {
-      console.log('[Audio] Sound not enabled yet - waiting for user interaction');
-      if (!hasShownAudioWarning.current) {
-        hasShownAudioWarning.current = true;
-        toast({
-          title: "Audio blocked",
-          description: "Tap anywhere on the page to enable sound alerts",
-        });
-      }
-      setAudioFailed(true);
-      return;
+      enableAudio();
     }
     
     let success = false;
@@ -324,8 +309,8 @@ export default function CustomerPage() {
         break;
     }
     
-    // If audio failed to play, show a toast
-    if (!success && !hasShownAudioWarning.current) {
+    // If audio failed, show warning only once
+    if (!success && !hasShownAudioWarning.current && !audioEnabledRef.current) {
       hasShownAudioWarning.current = true;
       setAudioFailed(true);
       toast({
@@ -333,27 +318,36 @@ export default function CustomerPage() {
         description: "Tap anywhere on the page to enable sound alerts",
       });
     }
-  }, [toast]);
+  }, [enableAudio, toast]);
   
+  // Initialize audio and push notifications on mount
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+    
+    console.log('[Init] Initializing audio and push notifications...');
+    enableAudio();
+    
+    // Request push permissions automatically
+    if (orderId) {
+      subscribeToPush();
+    }
+  }, [orderId, enableAudio]);
+  
+  // Fallback: Also enable on user interaction for browsers with strict autoplay policies
   useEffect(() => {
     const handleInteraction = () => {
       enableAudio();
       document.removeEventListener('touchstart', handleInteraction);
       document.removeEventListener('click', handleInteraction);
-      document.removeEventListener('scroll', handleInteraction);
-      document.removeEventListener('keydown', handleInteraction);
     };
     
     document.addEventListener('touchstart', handleInteraction, { passive: true });
     document.addEventListener('click', handleInteraction);
-    document.addEventListener('scroll', handleInteraction, { passive: true });
-    document.addEventListener('keydown', handleInteraction);
     
     return () => {
       document.removeEventListener('touchstart', handleInteraction);
       document.removeEventListener('click', handleInteraction);
-      document.removeEventListener('scroll', handleInteraction);
-      document.removeEventListener('keydown', handleInteraction);
     };
   }, [enableAudio]);
   
@@ -575,28 +569,29 @@ export default function CustomerPage() {
           </Card>
         )}
         
-        <div className={`flex items-center justify-center gap-2 text-xs ${audioFailed ? 'text-amber-600 animate-pulse' : 'text-muted-foreground'}`}>
-          {audioEnabled ? (
+        <div className={`flex items-center justify-center gap-2 text-xs flex-wrap ${audioFailed ? 'text-amber-600 animate-pulse' : 'text-muted-foreground'}`}>
+          {audioFailed ? (
+            <>
+              <VolumeX className="h-3 w-3" />
+              <span className="font-medium">Tap anywhere to enable sound</span>
+            </>
+          ) : (
             <>
               <Volume2 className="h-3 w-3 text-green-600" />
               <span className="text-green-600">Sound alerts active</span>
             </>
-          ) : audioFailed ? (
-            <>
-              <VolumeX className="h-3 w-3" />
-              <span className="font-medium">Tap anywhere to enable sound alerts</span>
-            </>
-          ) : (
-            <>
-              <VolumeX className="h-3 w-3" />
-              <span>Tap anywhere to enable sound alerts</span>
-            </>
           )}
-          {pushEnabled && (
+          {pushEnabled ? (
             <>
               <span>•</span>
               <Bell className="h-3 w-3 text-green-600" />
               <span className="text-green-600">Push enabled</span>
+            </>
+          ) : (
+            <>
+              <span>•</span>
+              <Bell className="h-3 w-3" />
+              <span className="text-muted-foreground">Push disabled</span>
             </>
           )}
         </div>
