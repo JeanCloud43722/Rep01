@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useNotificationOrchestrator } from "@/lib/notification-orchestrator";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -16,7 +17,9 @@ import {
   Calendar,
   Send,
   Gift,
-  Bell
+  Bell,
+  Smartphone,
+  Volume2
 } from "lucide-react";
 
 function getStatusConfig(status: Order["status"]) {
@@ -76,92 +79,6 @@ function formatRemainingTime(scheduledTime: string): string {
     return `${hours}h ${minutes}m ${seconds}s remaining`;
   }
   return `${minutes}m ${seconds}s remaining`;
-}
-
-// Gentle chime for incoming messages from staff
-function playMessageChime() {
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const now = audioContext.currentTime;
-    
-    // Soft two-tone ascending chime
-    const notes = [
-      { freq: 523.25, start: 0, duration: 0.12 },      // C5
-      { freq: 659.25, start: 0.12, duration: 0.18 }    // E5 (gentle ascent)
-    ];
-    
-    notes.forEach(({ freq, start, duration }) => {
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.type = "sine";
-      oscillator.frequency.value = freq;
-      
-      gainNode.gain.setValueAtTime(0, now + start);
-      gainNode.gain.linearRampToValueAtTime(0.25, now + start + 0.02);
-      gainNode.gain.setValueAtTime(0.25, now + start + duration - 0.04);
-      gainNode.gain.linearRampToValueAtTime(0, now + start + duration);
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.start(now + start);
-      oscillator.stop(now + start + duration);
-    });
-  } catch (error) {
-    console.error("Failed to play message chime:", error);
-  }
-}
-
-// Urgent buzzer sound for order ready - attention-grabbing
-function playOrderReadyBuzzer() {
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const now = audioContext.currentTime;
-    
-    // Three-pulse buzzer pattern with harmonic overlay
-    const pulses = [
-      { start: 0, duration: 0.15 },
-      { start: 0.25, duration: 0.15 },
-      { start: 0.5, duration: 0.3 }
-    ];
-    
-    pulses.forEach(({ start, duration }) => {
-      // Primary tone - sawtooth for buzzer character
-      const osc1 = audioContext.createOscillator();
-      const gain1 = audioContext.createGain();
-      osc1.type = "sawtooth";
-      osc1.frequency.value = 440; // A4
-      
-      gain1.gain.setValueAtTime(0, now + start);
-      gain1.gain.linearRampToValueAtTime(0.3, now + start + 0.02);
-      gain1.gain.setValueAtTime(0.3, now + start + duration - 0.03);
-      gain1.gain.linearRampToValueAtTime(0, now + start + duration);
-      
-      osc1.connect(gain1);
-      gain1.connect(audioContext.destination);
-      osc1.start(now + start);
-      osc1.stop(now + start + duration);
-      
-      // Harmonic overlay - square wave for presence
-      const osc2 = audioContext.createOscillator();
-      const gain2 = audioContext.createGain();
-      osc2.type = "square";
-      osc2.frequency.value = 880; // A5 (octave up)
-      
-      gain2.gain.setValueAtTime(0, now + start);
-      gain2.gain.linearRampToValueAtTime(0.1, now + start + 0.02);
-      gain2.gain.setValueAtTime(0.1, now + start + duration - 0.03);
-      gain2.gain.linearRampToValueAtTime(0, now + start + duration);
-      
-      osc2.connect(gain2);
-      gain2.connect(audioContext.destination);
-      osc2.start(now + start);
-      osc2.stop(now + start + duration);
-    });
-  } catch (error) {
-    console.error("Failed to play order ready buzzer:", error);
-  }
 }
 
 function SubscribedCard({ order, onRequestService, isRequestingService }: { order: Order; onRequestService: () => void; isRequestingService: boolean }) {
@@ -282,14 +199,29 @@ export default function CustomerPage() {
   const [hasRegistered, setHasRegistered] = useState(false);
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
+  
+  const { warmUp, notify, setRole, getCapabilities, getDeviceInfo, getCapabilitySummary, requestWakeLock } = useNotificationOrchestrator();
   
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
     refetchInterval: 4000
   });
+  
+  // Set role and initialize orchestrator
+  useEffect(() => {
+    setRole('customer');
+  }, []);
+  
+  // Enable audio with user interaction - required for iOS Safari
+  const enableAudio = () => {
+    warmUp();
+    setAudioEnabled(true);
+    requestWakeLock();
+  };
   
   // Track new messages and trigger animation
   useEffect(() => {
@@ -385,13 +317,15 @@ export default function CustomerPage() {
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
           if (message.type === "order_updated") {
-            // Play appropriate sound based on event type
-            if (message.eventType === "order_ready") {
-              playOrderReadyBuzzer();
-            } else if (message.eventType === "message") {
-              playMessageChime();
-            } else if (message.eventType === "offer") {
-              playMessageChime();
+            // Use notification orchestrator for audio/haptic/visual feedback
+            const eventType = message.eventType as 'order_ready' | 'message' | 'offer' | 'status_update';
+            if (eventType) {
+              notify({
+                type: eventType,
+                orderId: orderId,
+                title: message.title,
+                body: message.body
+              });
             }
             // Refetch the order data immediately
             queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
@@ -513,6 +447,41 @@ export default function CustomerPage() {
               </div>
             </CardContent>
           </Card>
+        )}
+        
+        {/* Enable Sound button for iOS Safari and other devices that require user interaction */}
+        {!audioEnabled && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="py-4">
+              <div className="flex flex-col items-center gap-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <Volume2 className="h-4 w-4 text-primary" />
+                  <span>Enable sound alerts for notifications</span>
+                </div>
+                <Button 
+                  onClick={enableAudio}
+                  variant="default"
+                  size="sm"
+                  data-testid="button-enable-audio"
+                >
+                  <Volume2 className="h-4 w-4 mr-2" />
+                  Enable Sound
+                </Button>
+                <p className="text-xs text-muted-foreground text-center">
+                  Tap to receive audio alerts when your order is ready
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        
+        {audioEnabled && (
+          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <Smartphone className="h-3 w-3" />
+            <span>{getDeviceInfo()}</span>
+            <span>•</span>
+            <span>{getCapabilitySummary().join(', ')}</span>
+          </div>
         )}
         
         <p className="text-center text-xs text-muted-foreground px-4">

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useNotificationOrchestrator } from "@/lib/notification-orchestrator";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText } from "lucide-react";
+import { FileText, Volume2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -77,66 +78,6 @@ function formatDate(isoString: string) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-// Alert sound for staff when customer requests service (Call Waiter)
-function playServiceRequestAlert() {
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const now = audioContext.currentTime;
-    
-    // Attention-grabbing staccato alert - three quick descending tones
-    const tones = [
-      { freq: 880, start: 0, duration: 0.1 },        // A5
-      { freq: 698.46, start: 0.15, duration: 0.1 },  // F5
-      { freq: 523.25, start: 0.3, duration: 0.15 }   // C5
-    ];
-    
-    tones.forEach(({ freq, start, duration }) => {
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.type = "triangle";
-      oscillator.frequency.value = freq;
-      
-      gainNode.gain.setValueAtTime(0, now + start);
-      gainNode.gain.linearRampToValueAtTime(0.4, now + start + 0.02);
-      gainNode.gain.setValueAtTime(0.4, now + start + duration - 0.03);
-      gainNode.gain.linearRampToValueAtTime(0, now + start + duration);
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.start(now + start);
-      oscillator.stop(now + start + duration);
-    });
-    
-    // Second alert after short pause for emphasis
-    setTimeout(() => {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const t = ctx.currentTime;
-      
-      tones.forEach(({ freq, start, duration }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        
-        osc.type = "triangle";
-        osc.frequency.value = freq;
-        
-        gain.gain.setValueAtTime(0, t + start);
-        gain.gain.linearRampToValueAtTime(0.35, t + start + 0.02);
-        gain.gain.setValueAtTime(0.35, t + start + duration - 0.03);
-        gain.gain.linearRampToValueAtTime(0, t + start + duration);
-        
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        
-        osc.start(t + start);
-        osc.stop(t + start + duration);
-      });
-    }, 600);
-  } catch (error) {
-    console.error("Failed to play service request alert:", error);
-  }
-}
 
 function OrderCard({ 
   order, 
@@ -785,11 +726,25 @@ export default function AdminPage() {
   const [scheduleOrderId, setScheduleOrderId] = useState<string | null>(null);
   const [offerOrderId, setOfferOrderId] = useState<string | null>(null);
   const [notesOrderId, setNotesOrderId] = useState<string | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  
+  const { warmUp, notify, setRole, getDeviceInfo, getCapabilitySummary } = useNotificationOrchestrator();
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
     refetchInterval: 4000
   });
+  
+  // Set role as staff for this page
+  useEffect(() => {
+    setRole('staff');
+  }, []);
+  
+  // Enable audio with user interaction
+  const enableAudio = () => {
+    warmUp();
+    setAudioEnabled(true);
+  };
   
   // Connect to admin WebSocket for real-time service request alerts
   useEffect(() => {
@@ -810,15 +765,29 @@ export default function AdminPage() {
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
           if (message.type === "admin_update") {
-            // Play alert for service requests (waiter button)
+            // Use notification orchestrator for audio/haptic feedback
+            const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed';
+            if (eventType) {
+              notify({
+                type: eventType,
+                orderId: message.orderId
+              });
+            }
+            
+            // Show toast for service requests
             if (message.eventType === "service_request") {
-              playServiceRequestAlert();
               toast({
                 title: "Service Request",
                 description: `Order ${message.orderId} needs assistance`,
                 variant: "destructive"
               });
+            } else if (message.eventType === "new_registration") {
+              toast({
+                title: "New Customer",
+                description: `Order ${message.orderId} customer arrived`,
+              });
             }
+            
             // Refetch orders to get latest data
             queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
           }
@@ -844,7 +813,7 @@ export default function AdminPage() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [toast]);
+  }, [toast, notify]);
   
   const createOrderMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/orders"),
@@ -1009,6 +978,21 @@ export default function AdminPage() {
           </div>
           
           <div className="flex items-center gap-2">
+            {!audioEnabled ? (
+              <Button 
+                variant="outline" 
+                onClick={enableAudio}
+                data-testid="button-enable-audio"
+              >
+                <Volume2 className="h-4 w-4 mr-2" />
+                Enable Sound
+              </Button>
+            ) : (
+              <Badge variant="secondary" className="text-xs">
+                <Volume2 className="h-3 w-3 mr-1" />
+                Sound On
+              </Badge>
+            )}
             <Button 
               variant="outline" 
               size="icon" 

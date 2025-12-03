@@ -40,7 +40,7 @@ const orderSubscribers = new Map<string, Set<any>>();
 const adminSubscribers = new Set<any>();
 
 // Event types for differentiated notifications
-type OrderEventType = "message" | "order_ready" | "service_request" | "offer" | "status_update";
+type OrderEventType = "message" | "order_ready" | "service_request" | "offer" | "status_update" | "new_registration" | "order_completed";
 
 async function sendSinglePushNotification(orderId: string, message?: string, notificationNumber: number = 1) {
   const order = await storage.getOrder(orderId);
@@ -270,6 +270,8 @@ export async function registerRoutes(
       // Only auto-register if still in "waiting" status
       if (order.status === "waiting") {
         const updatedOrder = await storage.updateOrderStatus(req.params.id, "subscribed");
+        // Notify admin that a new customer has registered
+        notifyAdminUpdate(req.params.id, "new_registration");
         res.json(updatedOrder);
       } else {
         res.json(order);

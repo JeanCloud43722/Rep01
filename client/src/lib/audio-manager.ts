@@ -1,0 +1,307 @@
+type SoundCue = 
+  | 'order-ready'      // Customer: urgent buzzer for pickup
+  | 'message'          // Customer: gentle chime for staff message
+  | 'offer'            // Customer: playful arpeggio for special offer
+  | 'status-update'    // Customer: subtle ping for status change
+  | 'service-request'  // Staff: urgent alert when customer calls waiter
+  | 'new-registration' // Staff: upbeat when customer registers
+  | 'order-completed'; // Staff: satisfying completion sound
+
+interface AudioCueConfig {
+  play: (ctx: AudioContext, time: number) => void;
+  duration: number;
+}
+
+class AudioManager {
+  private static instance: AudioManager;
+  private audioContext: AudioContext | null = null;
+  private isWarmedUp = false;
+  private volume = 0.7;
+  
+  private constructor() {}
+  
+  static getInstance(): AudioManager {
+    if (!AudioManager.instance) {
+      AudioManager.instance = new AudioManager();
+    }
+    return AudioManager.instance;
+  }
+  
+  warmUp(): void {
+    if (this.isWarmedUp) return;
+    
+    try {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume();
+      }
+      
+      this.isWarmedUp = true;
+      console.log('Audio Manager: Context warmed up');
+    } catch (error) {
+      console.error('Audio Manager: Failed to warm up context', error);
+    }
+  }
+  
+  private getContext(): AudioContext | null {
+    if (!this.audioContext || this.audioContext.state === 'closed') {
+      try {
+        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      } catch {
+        return null;
+      }
+    }
+    
+    if (this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+    
+    return this.audioContext;
+  }
+  
+  setVolume(level: number): void {
+    this.volume = Math.max(0, Math.min(1, level));
+  }
+  
+  getVolume(): number {
+    return this.volume;
+  }
+  
+  private createOscillator(
+    ctx: AudioContext,
+    type: OscillatorType,
+    frequency: number,
+    startTime: number,
+    duration: number,
+    gainEnvelope: { attack: number; sustain: number; release: number; peak: number }
+  ): void {
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
+    
+    const { attack, sustain, release, peak } = gainEnvelope;
+    const adjustedPeak = peak * this.volume;
+    
+    gainNode.gain.setValueAtTime(0, startTime);
+    gainNode.gain.linearRampToValueAtTime(adjustedPeak, startTime + attack);
+    gainNode.gain.setValueAtTime(adjustedPeak, startTime + attack + sustain);
+    gainNode.gain.linearRampToValueAtTime(0, startTime + attack + sustain + release);
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    oscillator.start(startTime);
+    oscillator.stop(startTime + duration);
+  }
+  
+  private cues: Record<SoundCue, AudioCueConfig> = {
+    'order-ready': {
+      duration: 1.2,
+      play: (ctx, now) => {
+        const pulses = [
+          { start: 0, freq: 440 },
+          { start: 0.25, freq: 440 },
+          { start: 0.5, freq: 523.25 },
+        ];
+        
+        pulses.forEach(({ start, freq }) => {
+          const osc1 = ctx.createOscillator();
+          const osc2 = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc1.type = 'sawtooth';
+          osc1.frequency.value = freq;
+          osc2.type = 'square';
+          osc2.frequency.value = freq * 1.01;
+          
+          gain.gain.setValueAtTime(0, now + start);
+          gain.gain.linearRampToValueAtTime(0.25 * this.volume, now + start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + start + 0.2);
+          
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc1.start(now + start);
+          osc1.stop(now + start + 0.22);
+          osc2.start(now + start);
+          osc2.stop(now + start + 0.22);
+        });
+      }
+    },
+    
+    'message': {
+      duration: 0.6,
+      play: (ctx, now) => {
+        const notes = [
+          { freq: 523.25, start: 0 },      // C5
+          { freq: 659.25, start: 0.15 },   // E5
+          { freq: 783.99, start: 0.3 },    // G5
+        ];
+        
+        notes.forEach(({ freq, start }) => {
+          this.createOscillator(ctx, 'sine', freq, now + start, 0.25, {
+            attack: 0.02,
+            sustain: 0.1,
+            release: 0.13,
+            peak: 0.3
+          });
+        });
+      }
+    },
+    
+    'offer': {
+      duration: 0.8,
+      play: (ctx, now) => {
+        const notes = [
+          { freq: 392, start: 0 },        // G4
+          { freq: 493.88, start: 0.1 },   // B4
+          { freq: 587.33, start: 0.2 },   // D5
+          { freq: 783.99, start: 0.3 },   // G5
+          { freq: 880, start: 0.4 },      // A5
+        ];
+        
+        notes.forEach(({ freq, start }) => {
+          this.createOscillator(ctx, 'triangle', freq, now + start, 0.3, {
+            attack: 0.02,
+            sustain: 0.1,
+            release: 0.18,
+            peak: 0.25
+          });
+        });
+      }
+    },
+    
+    'status-update': {
+      duration: 0.4,
+      play: (ctx, now) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        
+        osc.type = 'sine';
+        osc.frequency.value = 1200;
+        
+        filter.type = 'highpass';
+        filter.frequency.value = 800;
+        filter.Q.value = 5;
+        
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.2 * this.volume, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(now);
+        osc.stop(now + 0.4);
+      }
+    },
+    
+    'service-request': {
+      duration: 1.0,
+      play: (ctx, now) => {
+        const playSequence = (offset: number) => {
+          const tones = [
+            { freq: 880, start: 0 },        // A5
+            { freq: 698.46, start: 0.12 },  // F5
+            { freq: 523.25, start: 0.24 },  // C5
+          ];
+          
+          tones.forEach(({ freq, start }) => {
+            this.createOscillator(ctx, 'triangle', freq, now + offset + start, 0.15, {
+              attack: 0.01,
+              sustain: 0.08,
+              release: 0.06,
+              peak: 0.35
+            });
+          });
+        };
+        
+        playSequence(0);
+        playSequence(0.5);
+      }
+    },
+    
+    'new-registration': {
+      duration: 0.5,
+      play: (ctx, now) => {
+        const notes = [
+          { freq: 392, start: 0 },        // G4
+          { freq: 493.88, start: 0.1 },   // B4
+          { freq: 587.33, start: 0.2 },   // D5
+        ];
+        
+        notes.forEach(({ freq, start }) => {
+          this.createOscillator(ctx, 'sine', freq, now + start, 0.2, {
+            attack: 0.02,
+            sustain: 0.08,
+            release: 0.1,
+            peak: 0.25
+          });
+        });
+      }
+    },
+    
+    'order-completed': {
+      duration: 0.5,
+      play: (ctx, now) => {
+        this.createOscillator(ctx, 'sine', 349.23, now, 0.2, {
+          attack: 0.02,
+          sustain: 0.1,
+          release: 0.08,
+          peak: 0.3
+        });
+        
+        this.createOscillator(ctx, 'sine', 523.25, now + 0.2, 0.25, {
+          attack: 0.02,
+          sustain: 0.12,
+          release: 0.11,
+          peak: 0.3
+        });
+      }
+    }
+  };
+  
+  play(cue: SoundCue): boolean {
+    const ctx = this.getContext();
+    if (!ctx) {
+      console.warn('Audio Manager: No audio context available');
+      return false;
+    }
+    
+    const cueConfig = this.cues[cue];
+    if (!cueConfig) {
+      console.warn(`Audio Manager: Unknown cue "${cue}"`);
+      return false;
+    }
+    
+    try {
+      cueConfig.play(ctx, ctx.currentTime);
+      return true;
+    } catch (error) {
+      console.error(`Audio Manager: Failed to play "${cue}"`, error);
+      return false;
+    }
+  }
+  
+  playWithDelay(cue: SoundCue, delayMs: number): void {
+    setTimeout(() => this.play(cue), delayMs);
+  }
+}
+
+export const audioManager = AudioManager.getInstance();
+
+export function useAudioManager() {
+  const warmUp = () => audioManager.warmUp();
+  const play = (cue: SoundCue) => audioManager.play(cue);
+  const playWithDelay = (cue: SoundCue, delayMs: number) => audioManager.playWithDelay(cue, delayMs);
+  const setVolume = (level: number) => audioManager.setVolume(level);
+  const getVolume = () => audioManager.getVolume();
+  
+  return { warmUp, play, playWithDelay, setVolume, getVolume };
+}
