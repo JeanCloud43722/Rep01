@@ -35,45 +35,6 @@ const playBuzzer = () => {
   }
 };
 
-const playMessageSound = () => {
-  try {
-    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    const now = audioCtx.currentTime;
-    
-    // Classic two-tone message chime (like iMessage or notification)
-    const playTone = (freq: number, startTime: number, duration: number) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, startTime);
-      
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-      
-      osc.start(startTime);
-      osc.stop(startTime + duration);
-      
-      return { osc, gain };
-    };
-    
-    // Two ascending tones - classic message sound
-    const t1 = playTone(880, now, 0.15);        // A5
-    const t2 = playTone(1108, now + 0.12, 0.2); // C#6
-    
-    t2.osc.onended = () => {
-      t1.osc.disconnect(); t1.gain.disconnect();
-      t2.osc.disconnect(); t2.gain.disconnect();
-      audioCtx.close();
-    };
-  } catch (e) {
-    console.log('[Audio] Message sound failed:', e);
-  }
-};
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -610,7 +571,6 @@ function MessageModal({
   
   const handleSubmit = () => {
     if (orderId && message.trim()) {
-      playMessageSound();
       onSendMessage(orderId, message);
       onClose();
       setMessage("");
