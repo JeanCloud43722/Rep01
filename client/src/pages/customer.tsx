@@ -4,6 +4,7 @@ import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
 import { detectCapabilities } from "@/lib/device-capabilities";
+import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -206,6 +207,7 @@ function LoadingState() {
 }
 
 export default function CustomerPage() {
+  const { toast } = useToast();
   const params = useParams<{ id: string }>();
   const orderId = params.id;
   const [hasRegistered, setHasRegistered] = useState(false);
@@ -213,9 +215,11 @@ export default function CustomerPage() {
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [audioFailed, setAudioFailed] = useState(false);
   const audioEnabledRef = useRef(false);
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
+  const hasShownAudioWarning = useRef(false);
   const capabilities = detectCapabilities();
   
   const { data: order, isLoading, error } = useQuery<Order>({
@@ -231,6 +235,11 @@ export default function CustomerPage() {
     audioManager.warmUp();
     audioEnabledRef.current = true;
     setAudioEnabled(true);
+    setAudioFailed(false);
+    hasShownAudioWarning.current = false;
+    
+    // Play a brief confirmation sound
+    audioManager.play('status-update');
     
     if (capabilities.pushNotifications && !capabilities.isIOS) {
       subscribeToPush();
@@ -284,26 +293,47 @@ export default function CustomerPage() {
   
   const playSound = useCallback((type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
     console.log(`[Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabledRef.current}`);
+    
+    // If audio not enabled, show a warning toast once
     if (!audioEnabledRef.current) {
       console.log('[Audio] Sound not enabled yet - waiting for user interaction');
+      if (!hasShownAudioWarning.current) {
+        hasShownAudioWarning.current = true;
+        toast({
+          title: "Audio blocked",
+          description: "Tap anywhere on the page to enable sound alerts",
+        });
+      }
+      setAudioFailed(true);
       return;
     }
     
+    let success = false;
     switch (type) {
       case 'order_ready':
-        audioManager.play('order-ready');
+        success = audioManager.play('order-ready');
         break;
       case 'message':
-        audioManager.play('message');
+        success = audioManager.play('message');
         break;
       case 'offer':
-        audioManager.play('offer');
+        success = audioManager.play('offer');
         break;
       case 'status_update':
-        audioManager.play('status-update');
+        success = audioManager.play('status-update');
         break;
     }
-  }, []);
+    
+    // If audio failed to play, show a toast
+    if (!success && !hasShownAudioWarning.current) {
+      hasShownAudioWarning.current = true;
+      setAudioFailed(true);
+      toast({
+        title: "Audio blocked",
+        description: "Tap anywhere on the page to enable sound alerts",
+      });
+    }
+  }, [toast]);
   
   useEffect(() => {
     const handleInteraction = () => {
@@ -545,11 +575,16 @@ export default function CustomerPage() {
           </Card>
         )}
         
-        <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+        <div className={`flex items-center justify-center gap-2 text-xs ${audioFailed ? 'text-amber-600 animate-pulse' : 'text-muted-foreground'}`}>
           {audioEnabled ? (
             <>
               <Volume2 className="h-3 w-3 text-green-600" />
               <span className="text-green-600">Sound alerts active</span>
+            </>
+          ) : audioFailed ? (
+            <>
+              <VolumeX className="h-3 w-3" />
+              <span className="font-medium">Tap anywhere to enable sound alerts</span>
             </>
           ) : (
             <>

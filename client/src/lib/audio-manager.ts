@@ -99,37 +99,54 @@ class AudioManager {
   
   private cues: Record<SoundCue, AudioCueConfig> = {
     'order-ready': {
-      duration: 1.2,
+      duration: 1.5,
       play: (ctx, now) => {
-        const pulses = [
-          { start: 0, freq: 440 },
-          { start: 0.25, freq: 440 },
-          { start: 0.5, freq: 523.25 },
-        ];
-        
-        pulses.forEach(({ start, freq }) => {
+        // Clear, attention-grabbing "ding-dong" chime sound
+        // First note: higher pitched "ding"
+        const playChime = (startTime: number, freq1: number, freq2: number) => {
+          // Primary tone
           const osc1 = ctx.createOscillator();
+          const gain1 = ctx.createGain();
+          osc1.type = 'sine';
+          osc1.frequency.value = freq1;
+          gain1.gain.setValueAtTime(0, startTime);
+          gain1.gain.linearRampToValueAtTime(0.4 * this.volume, startTime + 0.01);
+          gain1.gain.exponentialRampToValueAtTime(0.001, startTime + 0.5);
+          osc1.connect(gain1);
+          gain1.connect(ctx.destination);
+          osc1.start(startTime);
+          osc1.stop(startTime + 0.5);
+          
+          // Harmonic overtone for richness
           const osc2 = ctx.createOscillator();
-          const gain = ctx.createGain();
+          const gain2 = ctx.createGain();
+          osc2.type = 'sine';
+          osc2.frequency.value = freq1 * 2;
+          gain2.gain.setValueAtTime(0, startTime);
+          gain2.gain.linearRampToValueAtTime(0.15 * this.volume, startTime + 0.01);
+          gain2.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3);
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.start(startTime);
+          osc2.stop(startTime + 0.3);
           
-          osc1.type = 'sawtooth';
-          osc1.frequency.value = freq;
-          osc2.type = 'square';
-          osc2.frequency.value = freq * 1.01;
-          
-          gain.gain.setValueAtTime(0, now + start);
-          gain.gain.linearRampToValueAtTime(0.25 * this.volume, now + start + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + start + 0.2);
-          
-          osc1.connect(gain);
-          osc2.connect(gain);
-          gain.connect(ctx.destination);
-          
-          osc1.start(now + start);
-          osc1.stop(now + start + 0.22);
-          osc2.start(now + start);
-          osc2.stop(now + start + 0.22);
-        });
+          // Second note after short delay
+          const osc3 = ctx.createOscillator();
+          const gain3 = ctx.createGain();
+          osc3.type = 'sine';
+          osc3.frequency.value = freq2;
+          gain3.gain.setValueAtTime(0, startTime + 0.25);
+          gain3.gain.linearRampToValueAtTime(0.35 * this.volume, startTime + 0.26);
+          gain3.gain.exponentialRampToValueAtTime(0.001, startTime + 0.75);
+          osc3.connect(gain3);
+          gain3.connect(ctx.destination);
+          osc3.start(startTime + 0.25);
+          osc3.stop(startTime + 0.75);
+        };
+        
+        // Play the chime twice for emphasis (ding-dong, ding-dong)
+        playChime(now, 880, 659.25);       // A5 -> E5 (classic doorbell)
+        playChime(now + 0.7, 880, 659.25); // Repeat for attention
       }
     },
     
