@@ -468,8 +468,45 @@ function NotifyModal({
   const DEFAULT_MESSAGE = "Your order is ready for pickup!";
   const [message, setMessage] = useState(DEFAULT_MESSAGE);
   
+  // Play a loud, unmistakable buzzer sound using Web Audio API
+  const playBuzzer = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      
+      // Create a loud 800Hz square wave buzzer - ~200ms
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      oscillator.type = 'square'; // Square wave for loud, digital buzzer sound
+      oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+      
+      // Start loud and decay slightly for a clean buzzer effect
+      gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.2);
+      
+      // Cleanup after sound finishes
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        gainNode.disconnect();
+        audioCtx.close();
+      };
+    } catch (e) {
+      // Fail silently - audio not critical
+      console.log('[Buzzer] Audio playback failed:', e);
+    }
+  };
+  
   const handleSubmit = () => {
     if (orderId) {
+      // Play buzzer directly in click handler for autoplay compliance
+      playBuzzer();
       onNotify(orderId, message);
       onClose();
       setMessage(DEFAULT_MESSAGE);
