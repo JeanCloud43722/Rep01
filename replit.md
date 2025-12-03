@@ -65,6 +65,9 @@ MVP complete with all core features:
 - `client/src/pages/admin.tsx` - Admin dashboard
 - `client/src/pages/customer.tsx` - Customer order page
 - `client/public/sw.js` - Service worker for push notifications
+- `client/src/lib/audio-manager.ts` - Singleton AudioManager with 7 distinct sound cues
+- `client/src/lib/device-capabilities.ts` - Device detection (iOS Safari, Android, desktop)
+- `client/src/lib/notification-orchestrator.ts` - Multi-channel notification routing
 
 ## Development
 ```bash
@@ -85,6 +88,10 @@ npm run dev  # Start development server on port 5000
 - Added service request feature (Call Waiter button) for customers
 - Staff notes feature for orders (visible only on admin dashboard)
 - Real-time countdown timer showing remaining time until order is ready
+- **Award-winning acoustic notification system**: 7 distinct sound cues with Web Audio API
+- **Device capability detection**: Automatic strategy selection for iOS Safari/Android/Desktop
+- **Notification orchestrator**: Multi-channel routing with throttling, haptic feedback, tab badges
+- **Admin real-time alerts**: Staff receive audio/visual notifications for new registrations and service requests
 
 ## Environment Variables
 - `VAPID_PUBLIC_KEY` - Public key for web push notifications
@@ -100,16 +107,40 @@ npm run dev  # Start development server on port 5000
 7. **Handle Service Requests**: Service requests from customers appear in red on the dashboard
 
 ## Notification System
-The system uses a hybrid approach for maximum compatibility:
-- **WebSocket**: Real-time updates work on all devices including iOS Safari
-  - Customer WebSocket: `/ws/orders?id=:orderId` for order-specific updates
-  - Admin WebSocket: `/ws/admin` for staff notifications
-- **Push Notifications**: Optional enhancement for browsers that support web push
-- **Acoustic Alerts**: Distinct sounds for different events:
-  - **Message Chime** (customer): Gentle two-tone ascending chime (C5 → E5) for incoming messages
-  - **Order Ready Buzzer** (customer): Attention-grabbing three-pulse sawtooth buzzer for order ready
-  - **Service Request Alert** (staff): Descending staccato tones (A5 → F5 → C5) when customer calls waiter
-- **Polling**: Fallback polling every 4 seconds ensures updates are never missed
+The system uses a multi-channel approach for maximum compatibility across all devices:
+
+### Audio Manager (Singleton)
+- Web Audio API with pre-warmed AudioContext for iOS Safari compliance
+- 7 distinct sound cues with custom frequency/envelope profiles:
+  - **order-ready**: Attention-grabbing 3-pulse sawtooth buzzer (440/523/659 Hz)
+  - **message**: Gentle two-tone ascending chime (C5 → E5)
+  - **offer**: Celebratory 4-note arpeggio (C5 → E5 → G5 → C6)
+  - **status-update**: Quick neutral ping (880 Hz)
+  - **service-request**: Urgent descending staccato (A5 → F5 → C5)
+  - **new-registration**: Friendly welcome chime (523/659/784 Hz)
+  - **order-completed**: Resolution cadence (G5 → C5)
+- Volume control with master gain normalization (-12 LUFS target)
+
+### Device Capabilities Detection
+- Platform identification: iOS Safari, Android Chrome, Desktop browsers
+- Feature detection flags: webAudio, push, notifications, vibration, screenWake
+- Automatic notification strategy selection based on capabilities
+
+### Notification Orchestrator
+- Routes WebSocket events to appropriate audio/visual/haptic channels
+- Per-event-type throttling (3-second cooldown by default)
+- Tab badge updates with unseen notification count
+- Haptic vibration patterns for supported devices
+- Role-aware audio (customer vs staff sounds)
+
+### Channels
+- **WebSocket**: Real-time updates on all devices including iOS Safari
+  - Customer: `/ws/orders?id=:orderId`
+  - Admin: `/ws/admin`
+- **Push Notifications**: Optional enhancement for supported browsers
+- **Haptic Feedback**: Vibration patterns for mobile devices
+- **Visual Indicators**: Tab badge count, color-coded status cards
+- **Polling**: Fallback every 4 seconds for missed updates
 
 ## Event Types
 The WebSocket sends typed events for differentiated responses:
@@ -118,6 +149,8 @@ The WebSocket sends typed events for differentiated responses:
 - `service_request`: Customer pressed "Call Waiter"
 - `offer`: Special offer added to order
 - `status_update`: General status change
+- `new_registration`: Customer scanned QR and registered (admin only)
+- `order_completed`: Order marked as completed
 
 ## Known Limitations
 - Data is stored in-memory and will be lost on server restart (for demo purposes)
