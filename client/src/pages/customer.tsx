@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -19,8 +19,8 @@ import {
   Send,
   Gift,
   Bell,
-  Smartphone,
-  Volume2
+  Volume2,
+  VolumeX
 } from "lucide-react";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -213,7 +213,7 @@ export default function CustomerPage() {
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [deviceInfo, setDeviceInfo] = useState("");
+  const audioEnabledRef = useRef(false);
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
   const capabilities = detectCapabilities();
@@ -224,40 +224,18 @@ export default function CustomerPage() {
     refetchInterval: 4000
   });
   
-  useEffect(() => {
-    const info = capabilities.isIOS ? "iOS" : capabilities.isAndroid ? "Android" : "Desktop";
-    setDeviceInfo(info);
-  }, []);
-  
-  const playSound = (type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
-    console.log(`[Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabled}`);
-    if (!audioEnabled) {
-      console.log('[Audio] Sound not enabled yet');
-      return;
-    }
+  const enableAudio = useCallback(() => {
+    if (audioEnabledRef.current) return;
     
-    switch (type) {
-      case 'order_ready':
-        audioManager.play('order-ready');
-        break;
-      case 'message':
-        audioManager.play('message');
-        break;
-      case 'offer':
-        audioManager.play('offer');
-        break;
-      case 'status_update':
-        audioManager.play('status-update');
-        break;
-    }
-  };
-  
-  const enableAudio = () => {
-    console.log('[Audio] Enabling audio...');
+    console.log('[Audio] Auto-enabling audio on user interaction...');
     audioManager.warmUp();
+    audioEnabledRef.current = true;
     setAudioEnabled(true);
-    audioManager.play('status-update');
-  };
+    
+    if (capabilities.pushNotifications && !capabilities.isIOS) {
+      subscribeToPush();
+    }
+  }, []);
   
   const subscribeToPush = async () => {
     if (!orderId) return;
@@ -304,13 +282,50 @@ export default function CustomerPage() {
     }
   };
   
-  const enableNotifications = async () => {
-    enableAudio();
-    
-    if (capabilities.pushNotifications && !capabilities.isIOS) {
-      await subscribeToPush();
+  const playSound = useCallback((type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
+    console.log(`[Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabledRef.current}`);
+    if (!audioEnabledRef.current) {
+      console.log('[Audio] Sound not enabled yet - waiting for user interaction');
+      return;
     }
-  };
+    
+    switch (type) {
+      case 'order_ready':
+        audioManager.play('order-ready');
+        break;
+      case 'message':
+        audioManager.play('message');
+        break;
+      case 'offer':
+        audioManager.play('offer');
+        break;
+      case 'status_update':
+        audioManager.play('status-update');
+        break;
+    }
+  }, []);
+  
+  useEffect(() => {
+    const handleInteraction = () => {
+      enableAudio();
+      document.removeEventListener('touchstart', handleInteraction);
+      document.removeEventListener('click', handleInteraction);
+      document.removeEventListener('scroll', handleInteraction);
+      document.removeEventListener('keydown', handleInteraction);
+    };
+    
+    document.addEventListener('touchstart', handleInteraction, { passive: true });
+    document.addEventListener('click', handleInteraction);
+    document.addEventListener('scroll', handleInteraction, { passive: true });
+    document.addEventListener('keydown', handleInteraction);
+    
+    return () => {
+      document.removeEventListener('touchstart', handleInteraction);
+      document.removeEventListener('click', handleInteraction);
+      document.removeEventListener('scroll', handleInteraction);
+      document.removeEventListener('keydown', handleInteraction);
+    };
+  }, [enableAudio]);
   
   useEffect(() => {
     if (order && order.messages.length > lastMessageCountRef.current) {
@@ -363,9 +378,7 @@ export default function CustomerPage() {
   });
   
   const handleRequestService = () => {
-    if (!audioEnabled) {
-      enableAudio();
-    }
+    enableAudio();
     serviceRequestMutation.mutate();
   };
   
@@ -436,7 +449,7 @@ export default function CustomerPage() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [orderId, audioEnabled]);
+  }, [orderId, playSound]);
   
   if (isLoading) {
     return <LoadingState />;
@@ -532,50 +545,29 @@ export default function CustomerPage() {
           </Card>
         )}
         
-        {!audioEnabled && (
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="py-4">
-              <div className="flex flex-col items-center gap-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Volume2 className="h-4 w-4 text-primary" />
-                  <span>Enable notifications for this order</span>
-                </div>
-                <Button 
-                  onClick={enableNotifications}
-                  variant="default"
-                  size="sm"
-                  data-testid="button-enable-audio"
-                >
-                  <Bell className="h-4 w-4 mr-2" />
-                  Enable Notifications
-                </Button>
-                <p className="text-xs text-muted-foreground text-center">
-                  {capabilities.pushNotifications && !capabilities.isIOS 
-                    ? "Receive sound and push notifications when your order is ready"
-                    : "Receive sound alerts when your order is ready"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        
-        {audioEnabled && (
-          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-            <Smartphone className="h-3 w-3" />
-            <span>{deviceInfo}</span>
-            <span>•</span>
-            <span className="text-green-600">Sound enabled</span>
-            {pushEnabled && (
-              <>
-                <span>•</span>
-                <span className="text-green-600">Push enabled</span>
-              </>
-            )}
-          </div>
-        )}
+        <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          {audioEnabled ? (
+            <>
+              <Volume2 className="h-3 w-3 text-green-600" />
+              <span className="text-green-600">Sound alerts active</span>
+            </>
+          ) : (
+            <>
+              <VolumeX className="h-3 w-3" />
+              <span>Tap anywhere to enable sound alerts</span>
+            </>
+          )}
+          {pushEnabled && (
+            <>
+              <span>•</span>
+              <Bell className="h-3 w-3 text-green-600" />
+              <span className="text-green-600">Push enabled</span>
+            </>
+          )}
+        </div>
         
         <p className="text-center text-xs text-muted-foreground px-4">
-          Keep this page open or save this link to check your order status anytime
+          Keep this page open to receive alerts when your order is ready
         </p>
       </div>
     </div>

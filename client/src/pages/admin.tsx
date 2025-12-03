@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -727,15 +727,16 @@ export default function AdminPage() {
   const [offerOrderId, setOfferOrderId] = useState<string | null>(null);
   const [notesOrderId, setNotesOrderId] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const audioEnabledRef = useRef(false);
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
     refetchInterval: 4000
   });
   
-  const playStaffSound = (type: 'service_request' | 'new_registration' | 'order_completed') => {
-    console.log(`[Admin Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabled}`);
-    if (!audioEnabled) {
+  const playStaffSound = useCallback((type: 'service_request' | 'new_registration' | 'order_completed') => {
+    console.log(`[Admin Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabledRef.current}`);
+    if (!audioEnabledRef.current) {
       console.log('[Admin Audio] Sound not enabled yet');
       return;
     }
@@ -751,14 +752,38 @@ export default function AdminPage() {
         audioManager.play('order-completed');
         break;
     }
-  };
+  }, []);
   
-  const enableAudio = () => {
-    console.log('[Admin Audio] Enabling audio...');
+  const enableAudio = useCallback(() => {
+    if (audioEnabledRef.current) return;
+    console.log('[Admin Audio] Auto-enabling audio...');
     audioManager.warmUp();
+    audioEnabledRef.current = true;
     setAudioEnabled(true);
-    audioManager.play('status-update');
-  };
+  }, []);
+  
+  // Auto-enable audio on first interaction
+  useEffect(() => {
+    const handleInteraction = () => {
+      enableAudio();
+      document.removeEventListener('touchstart', handleInteraction);
+      document.removeEventListener('click', handleInteraction);
+      document.removeEventListener('scroll', handleInteraction);
+      document.removeEventListener('keydown', handleInteraction);
+    };
+    
+    document.addEventListener('touchstart', handleInteraction, { passive: true });
+    document.addEventListener('click', handleInteraction);
+    document.addEventListener('scroll', handleInteraction, { passive: true });
+    document.addEventListener('keydown', handleInteraction);
+    
+    return () => {
+      document.removeEventListener('touchstart', handleInteraction);
+      document.removeEventListener('click', handleInteraction);
+      document.removeEventListener('scroll', handleInteraction);
+      document.removeEventListener('keydown', handleInteraction);
+    };
+  }, [enableAudio]);
   
   // Connect to admin WebSocket for real-time service request alerts
   useEffect(() => {
@@ -993,21 +1018,10 @@ export default function AdminPage() {
           </div>
           
           <div className="flex items-center gap-2">
-            {!audioEnabled ? (
-              <Button 
-                variant="outline" 
-                onClick={enableAudio}
-                data-testid="button-enable-audio"
-              >
-                <Volume2 className="h-4 w-4 mr-2" />
-                Enable Sound
-              </Button>
-            ) : (
-              <Badge variant="secondary" className="text-xs">
-                <Volume2 className="h-3 w-3 mr-1" />
-                Sound On
-              </Badge>
-            )}
+            <Badge variant={audioEnabled ? "secondary" : "outline"} className="text-xs">
+              <Volume2 className="h-3 w-3 mr-1" />
+              {audioEnabled ? "Sound On" : "Tap to enable sound"}
+            </Badge>
             <Button 
               variant="outline" 
               size="icon" 

@@ -90,7 +90,7 @@ npm run dev  # Start development server on port 5000
 - Real-time countdown timer showing remaining time until order is ready
 - **Award-winning acoustic notification system**: 7 distinct sound cues with Web Audio API
 - **Device capability detection**: Automatic strategy selection for iOS Safari/Android/Desktop
-- **Notification orchestrator**: Multi-channel routing with throttling, haptic feedback, tab badges
+- **Seamless audio auto-enable**: Audio is enabled on ANY user interaction (tap, scroll, click) anywhere on the page - no explicit button click needed
 - **Admin real-time alerts**: Staff receive audio/visual notifications for new registrations and service requests
 
 ## Environment Variables
@@ -100,7 +100,7 @@ npm run dev  # Start development server on port 5000
 ## How to Use
 1. **Create Order**: Click "New Order" button on admin dashboard
 2. **Share QR Code**: Click "QR Code" button on order card to display scannable QR
-3. **Customer Visits**: Customer scans QR and is automatically registered (no button click needed!)
+3. **Customer Visits**: Customer scans QR and is automatically registered. Sound alerts are auto-enabled on their first tap/scroll - no buttons to click!
 4. **Add Notes**: Click "Notes" button to add table number, name, or other info
 5. **Schedule Notification**: Click "Schedule" to set future notification time with countdown
 6. **Immediate Notification**: Click "Notify Now" to send alert immediately
