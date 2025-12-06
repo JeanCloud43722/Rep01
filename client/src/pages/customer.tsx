@@ -223,8 +223,6 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
   const statusConfig = getStatusConfig(order.status);
   const StatusIcon = statusConfig.icon;
   const [remainingTime, setRemainingTime] = useState<string>("");
-  const [isTestingPush, setIsTestingPush] = useState(false);
-  const { toast } = useToast();
   
   useEffect(() => {
     if (!order.scheduledTime || order.status !== "scheduled") return;
@@ -238,25 +236,6 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
     
     return () => clearInterval(interval);
   }, [order.scheduledTime, order.status]);
-  
-  const handleTestPush = async () => {
-    setIsTestingPush(true);
-    try {
-      await apiRequest("POST", `/api/orders/${order.id}/trigger`, {});
-      toast({
-        title: "Test notification sent",
-        description: "Check your browser notifications"
-      });
-    } catch (error) {
-      toast({
-        title: "Test failed",
-        description: "Could not send test notification",
-        variant: "destructive"
-      });
-    } finally {
-      setIsTestingPush(false);
-    }
-  };
   
   return (
     <Card>
@@ -288,41 +267,21 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
             <span>This page updates automatically</span>
           </div>
           
-          <div className="flex flex-col gap-3 w-full max-w-xs">
-            <Button 
-              variant="destructive"
-              size="lg"
-              onClick={onRequestService}
-              disabled={isRequestingService}
-              className="w-full"
-              data-testid="button-request-service"
-            >
-              {isRequestingService ? (
-                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-              ) : (
-                <AlertCircle className="h-5 w-5 mr-2" />
-              )}
-              {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
-            </Button>
-            
-            {order.subscription && (
-              <Button 
-                variant="outline"
-                size="sm"
-                onClick={handleTestPush}
-                disabled={isTestingPush}
-                className="w-full"
-                data-testid="button-test-push"
-              >
-                {isTestingPush ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Bell className="h-4 w-4 mr-2" />
-                )}
-                {isTestingPush ? "Sending..." : "Test Notification"}
-              </Button>
+          <Button 
+            variant="destructive"
+            size="lg"
+            onClick={onRequestService}
+            disabled={isRequestingService}
+            className="mt-4 w-full max-w-xs"
+            data-testid="button-request-service"
+          >
+            {isRequestingService ? (
+              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+            ) : (
+              <AlertCircle className="h-5 w-5 mr-2" />
             )}
-          </div>
+            {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
+          </Button>
         </div>
       </CardContent>
     </Card>

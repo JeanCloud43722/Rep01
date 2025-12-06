@@ -27,10 +27,6 @@ self.addEventListener("push", (event) => {
     }
   }
   
-  // Log delivery confirmation (best-effort analytics)
-  const timestamp = new Date().toISOString();
-  console.log(`[Push Delivered] ${timestamp} - Title: ${data.title}, URL: ${data.url}`);
-  
   const options = {
     body: data.body,
     icon: data.icon || "/favicon.png",
@@ -42,22 +38,8 @@ self.addEventListener("push", (event) => {
     silent: false,
     sound: "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAAA=",
     data: {
-      url: data.url || "/",
-      deliveredAt: timestamp
-    },
-    // Action buttons for better UX
-    actions: [
-      {
-        action: "open",
-        title: "View Order",
-        icon: "/favicon.png"
-      },
-      {
-        action: "close",
-        title: "Dismiss",
-        icon: "/favicon.png"
-      }
-    ]
+      url: data.url || "/"
+    }
   };
   
   event.waitUntil(
@@ -66,21 +48,10 @@ self.addEventListener("push", (event) => {
 });
 
 self.addEventListener("notificationclick", (event) => {
-  console.log("Notification action:", event.action);
+  console.log("Notification clicked");
   event.notification.close();
   
-  // Handle action buttons
-  if (event.action === "close") {
-    return;
-  }
-  
   const url = event.notification.data?.url || "/";
-  const deliveredAt = event.notification.data?.deliveredAt;
-  
-  if (deliveredAt) {
-    const clickedAt = new Date().toISOString();
-    console.log(`[Push Interaction] Delivered at ${deliveredAt}, clicked at ${clickedAt}`);
-  }
   
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true })
