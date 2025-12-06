@@ -24,6 +24,121 @@ import {
   VolumeX
 } from "lucide-react";
 
+// Audio utilities for customer notifications
+const playWelcomeSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    
+    // Friendly three-tone welcome chime
+    const playTone = (freq: number, startTime: number, duration: number) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.4, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+      
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+      
+      return { osc, gain };
+    };
+    
+    // Three ascending tones - friendly welcome
+    const t1 = playTone(523, now, 0.2);          // C5
+    const t2 = playTone(659, now + 0.15, 0.2);  // E5
+    const t3 = playTone(784, now + 0.30, 0.25); // G5
+    
+    t3.osc.onended = () => {
+      t1.osc.disconnect(); t1.gain.disconnect();
+      t2.osc.disconnect(); t2.gain.disconnect();
+      t3.osc.disconnect(); t3.gain.disconnect();
+      audioCtx.close();
+    };
+  } catch (e) {
+    console.log('[Audio] Welcome sound failed:', e);
+  }
+};
+
+const playOrderReadySound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    
+    // Loud buzzer for order ready - same as admin
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+    
+    gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    
+    oscillator.start(audioCtx.currentTime);
+    oscillator.stop(audioCtx.currentTime + 0.2);
+    
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      gainNode.disconnect();
+      audioCtx.close();
+    };
+  } catch (e) {
+    console.log('[Audio] Order ready sound failed:', e);
+  }
+};
+
+const playMessageNotificationSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    
+    // Classic two-tone message chime
+    const playTone = (freq: number, startTime: number, duration: number) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+      
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+      
+      return { osc, gain };
+    };
+    
+    // Two ascending tones - classic message sound
+    const t1 = playTone(880, now, 0.15);        // A5
+    const t2 = playTone(1108, now + 0.12, 0.2); // C#6
+    
+    t2.osc.onended = () => {
+      t1.osc.disconnect(); t1.gain.disconnect();
+      t2.osc.disconnect(); t2.gain.disconnect();
+      audioCtx.close();
+    };
+  } catch (e) {
+    console.log('[Audio] Message sound failed:', e);
+  }
+};
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -296,10 +411,12 @@ export default function CustomerPage() {
     let success = false;
     switch (type) {
       case 'order_ready':
-        success = audioManager.play('order-ready');
+        playOrderReadySound();
+        success = true;
         break;
       case 'message':
-        success = audioManager.play('message');
+        playMessageNotificationSound();
+        success = true;
         break;
       case 'offer':
         success = audioManager.play('offer');
@@ -388,6 +505,7 @@ export default function CustomerPage() {
     },
     onSuccess: () => {
       setHasRegistered(true);
+      playWelcomeSound();
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     }
   });
