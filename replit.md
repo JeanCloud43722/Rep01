@@ -92,6 +92,11 @@ npm run dev  # Start development server on port 5000
 - **Device capability detection**: Automatic strategy selection for iOS Safari/Android/Desktop
 - **Seamless audio auto-enable**: Audio is enabled on ANY user interaction (tap, scroll, click) anywhere on the page - no explicit button click needed
 - **Admin real-time alerts**: Staff receive audio/visual notifications for new registrations and service requests
+- **Fixed audio notifications for incoming messages**: Implemented shared, persistent AudioContext to reliably play:
+  - Loud 800Hz buzzer on "Notify Now", "Send Notification", and "Schedule Notification" (staff side)
+  - Two-tone ascending chime (A5→C#6) for incoming customer messages
+  - Three-tone welcome chime (C5→E5→G5) when customer arrives
+  - Order-ready buzzer on customer page when order is ready
 
 ## Environment Variables
 - `VAPID_PUBLIC_KEY` - Public key for web push notifications

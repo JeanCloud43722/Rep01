@@ -24,19 +24,38 @@ import {
   VolumeX
 } from "lucide-react";
 
-// Audio utilities for customer notifications
+// Shared audio context for customer notifications
+let sharedAudioCtx: AudioContext | null = null;
+
+const getAudioContext = (): AudioContext | null => {
+  try {
+    if (!sharedAudioCtx) {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      sharedAudioCtx = new AudioContext();
+    }
+    if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
+      sharedAudioCtx.resume().catch(() => {});
+    }
+    return sharedAudioCtx;
+  } catch (e) {
+    console.log('[Audio] Failed to get context:', e);
+    return null;
+  }
+};
+
 const playWelcomeSound = () => {
   try {
-    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const audioCtx = getAudioContext();
+    if (!audioCtx) return;
     const now = audioCtx.currentTime;
     
     // Friendly three-tone welcome chime
     const playTone = (freq: number, startTime: number, duration: number) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
       
       osc.connect(gain);
-      gain.connect(audioCtx.destination);
+      gain.connect(audioCtx!.destination);
       
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, startTime);
@@ -52,16 +71,11 @@ const playWelcomeSound = () => {
     };
     
     // Three ascending tones - friendly welcome
-    const t1 = playTone(523, now, 0.2);          // C5
-    const t2 = playTone(659, now + 0.15, 0.2);  // E5
-    const t3 = playTone(784, now + 0.30, 0.25); // G5
+    playTone(523, now, 0.2);          // C5
+    playTone(659, now + 0.15, 0.2);  // E5
+    playTone(784, now + 0.30, 0.25); // G5
     
-    t3.osc.onended = () => {
-      t1.osc.disconnect(); t1.gain.disconnect();
-      t2.osc.disconnect(); t2.gain.disconnect();
-      t3.osc.disconnect(); t3.gain.disconnect();
-      audioCtx.close();
-    };
+    console.log('[Audio] Welcome sound triggered');
   } catch (e) {
     console.log('[Audio] Welcome sound failed:', e);
   }
@@ -69,8 +83,8 @@ const playWelcomeSound = () => {
 
 const playOrderReadySound = () => {
   try {
-    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    const now = audioCtx.currentTime;
+    const audioCtx = getAudioContext();
+    if (!audioCtx) return;
     
     // Loud buzzer for order ready - same as admin
     const oscillator = audioCtx.createOscillator();
@@ -89,11 +103,7 @@ const playOrderReadySound = () => {
     oscillator.start(audioCtx.currentTime);
     oscillator.stop(audioCtx.currentTime + 0.2);
     
-    oscillator.onended = () => {
-      oscillator.disconnect();
-      gainNode.disconnect();
-      audioCtx.close();
-    };
+    console.log('[Audio] Order ready sound triggered');
   } catch (e) {
     console.log('[Audio] Order ready sound failed:', e);
   }
@@ -101,16 +111,20 @@ const playOrderReadySound = () => {
 
 const playMessageNotificationSound = () => {
   try {
-    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const audioCtx = getAudioContext();
+    if (!audioCtx) {
+      console.log('[Audio] No audio context available for message sound');
+      return;
+    }
     const now = audioCtx.currentTime;
     
     // Classic two-tone message chime
     const playTone = (freq: number, startTime: number, duration: number) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
       
       osc.connect(gain);
-      gain.connect(audioCtx.destination);
+      gain.connect(audioCtx!.destination);
       
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, startTime);
@@ -126,14 +140,10 @@ const playMessageNotificationSound = () => {
     };
     
     // Two ascending tones - classic message sound
-    const t1 = playTone(880, now, 0.15);        // A5
-    const t2 = playTone(1108, now + 0.12, 0.2); // C#6
+    playTone(880, now, 0.15);        // A5
+    playTone(1108, now + 0.12, 0.2); // C#6
     
-    t2.osc.onended = () => {
-      t1.osc.disconnect(); t1.gain.disconnect();
-      t2.osc.disconnect(); t2.gain.disconnect();
-      audioCtx.close();
-    };
+    console.log('[Audio] Message notification sound triggered');
   } catch (e) {
     console.log('[Audio] Message sound failed:', e);
   }
