@@ -1,0 +1,84 @@
+Here is an **optimized, precise, and implementation-ready English prompt** that instructs a Vibe Coding AI to **symmetrically extend the existing Bistro Buzzer system** so that **customers can message staff** using the **same technical foundation** already built for staff-to-customer Web Push — while preserving all current constraints (Flask-only, no build, in-memory, etc.).
+
+---
+
+### ✨ Optimized Prompt: Enable Bidirectional Messaging in Bistro Buzzer
+
+Extend the current **Flask-based digital buzzer system** to support **bidirectional messaging** between **staff and customers**, using the **same Web Push infrastructure** already implemented for order notifications.
+
+#### 🔁 Core Principle:
+> **Reuse, don’t rebuild.** The customer must be able to send messages **through the exact same data model, notification channel, and UI patterns** that staff already use — but in reverse.
+
+---
+
+#### ✅ Requirements:
+
+1. **Customer Messaging UI**  
+   - On `/order/<id>`, if the customer has an active push subscription, **show a message input field + “Send to Staff” button** (only after enabling notifications).  
+   - The UI must appear **only if the order exists and the customer is subscribed**.
+
+2. **Message Delivery**  
+   - When the customer sends a message, it **must be delivered to staff via the admin panel** — **not via Web Push to staff** (since staff are actively using `/admin`).  
+   - Display customer messages in real-time in the `/admin` order row (e.g., below the order status).
+
+3. **Data Model Extension**  
+   - Add a new field to each order:  
+     ```python
+     "messages": []  # list of { "from": "customer"|"staff", "text": "...", "timestamp": "..." }
+     ```
+   - Both staff and customer messages are stored here.
+
+4. **New Endpoint**  
+   - `POST /message/<order_id>/from-customer`  
+     - Accepts `{ "text": "..." }`  
+     - Validates that the order exists and the customer is the sender (identity via URL only)  
+     - Appends message to `orders[order_id]["messages"]`  
+     - **Does not send a Web Push to staff** (staff are assumed to be watching `/admin`)
+
+5. **Admin Panel Update**  
+   - In `/admin`, for each order, **display the full message history** in chronological order.  
+   - Use simple labels:  
+     - 💬 **Customer**: “Where is my soup?”  
+     - 👨‍🍳 **Staff**: “Coming in 2 min!”
+
+6. **Staff Messaging (Existing)**  
+   - Keep current `/message/<id>/send` or `/trigger/<id>` for staff → customer Web Push.  
+   - Staff-sent messages **must also be saved** in the `messages` array for audit/history.
+
+7. **Constraints (Non-Negotiable)**  
+   - **No new dependencies** (still only Flask, apscheduler, pywebpush)  
+   - **No WebSocket, polling, or HTTP long-polling** — `/admin` may refresh via existing `setInterval(fetchOrders, 5000)`  
+   - **No authentication** — customer identity is the order link; staff identity is session-less (admin is local-only)  
+   - **No changes to `sw.js`** — customer-to-staff is **not a push notification**, just data storage  
+   - **Preserve all existing functionality**: QR, buzzer, scheduling, multi-order
+
+---
+
+#### 📦 Deliverables:
+- Updated `app.py` with new route `/message/<id>/from-customer` and message storage  
+- Updated `templates/customer.html` with customer message input (conditional on subscription)  
+- Updated `templates/admin.html` with message history display per order  
+- **No changes to `static/sw.js`**
+
+---
+
+#### 🎯 Success Criteria:
+A developer copies the files, runs:
+```bash
+pip install flask apscheduler pywebpush
+python app.py
+```
+Then:
+1. Creates an order in `/admin`  
+2. Scans QR → enables push on `/order/abc123`  
+3. Sees a **“Send Message to Staff”** box  
+4. Sends: _“Is my dessert ready?”_  
+5. Staff sees the message appear in `/admin` within 5 seconds  
+6. Staff replies via existing flow → customer gets Web Push  
+7. Full conversation history is visible in admin
+
+> **This creates a symmetric, robust, minimal chat-like experience — without breaking the original buzzer’s simplicity or runtime constraints.**
+
+--- 
+
+This prompt ensures the AI **extends, not replaces**, your working system — and keeps everything runnable with `python app.py`.

@@ -21,7 +21,8 @@ import {
   Gift,
   Bell,
   Volume2,
-  VolumeX
+  VolumeX,
+  MessageSquare
 } from "lucide-react";
 
 // Shared audio context for customer notifications
@@ -529,9 +530,27 @@ export default function CustomerPage() {
     }
   });
   
+  const [customerMessage, setCustomerMessage] = useState("");
+  const customerMessageMutation = useMutation({
+    mutationFn: async () => {
+      if (!customerMessage.trim()) return;
+      return apiRequest("POST", `/api/orders/${orderId}/customer-message`, {
+        message: customerMessage.trim()
+      });
+    },
+    onSuccess: () => {
+      setCustomerMessage("");
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+    }
+  });
+  
   const handleRequestService = () => {
     enableAudio();
     serviceRequestMutation.mutate();
+  };
+  
+  const handleSendMessage = () => {
+    customerMessageMutation.mutate();
   };
   
   useEffect(() => {
@@ -693,6 +712,42 @@ export default function CustomerPage() {
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {pushEnabled && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Send Message to Staff
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                type="text"
+                placeholder="Ask staff something..."
+                value={customerMessage}
+                onChange={(e) => setCustomerMessage(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === "Enter" && customerMessage.trim()) {
+                    handleSendMessage();
+                  }
+                }}
+                disabled={customerMessageMutation.isPending}
+                className="w-full px-3 py-2 border rounded-md text-sm"
+                data-testid="input-customer-message"
+              />
+              <Button
+                onClick={handleSendMessage}
+                disabled={!customerMessage.trim() || customerMessageMutation.isPending}
+                className="w-full"
+                size="sm"
+                data-testid="button-send-message"
+              >
+                {customerMessageMutation.isPending ? "Sending..." : "Send to Staff"}
+              </Button>
             </CardContent>
           </Card>
         )}

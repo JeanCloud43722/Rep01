@@ -161,6 +161,19 @@ function OrderCard({
           </div>
         )}
 
+        {order.messages.length > 0 && (
+          <div className="text-sm bg-muted/50 rounded-md px-3 py-2 space-y-2">
+            <p className="font-medium text-xs text-muted-foreground">Messages ({order.messages.length})</p>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {[...order.messages].reverse().slice(0, 3).map((msg) => (
+                <p key={msg.id} className="text-foreground text-xs break-words">
+                  <span className="text-muted-foreground">{formatTime(msg.sentAt)}</span>: {msg.text}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
         {order.notes && (
           <div className="flex items-start gap-2 text-sm bg-muted/50 rounded-md px-3 py-2">
             <FileText className="h-4 w-4 flex-shrink-0 mt-0.5 text-muted-foreground" />
