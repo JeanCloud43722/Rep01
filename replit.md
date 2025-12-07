@@ -97,6 +97,7 @@ npm run dev  # Start development server on port 5000
   - Two-tone ascending chime (A5→C#6) for incoming customer messages
   - Three-tone welcome chime (C5→E5→G5) when customer arrives
   - Order-ready buzzer on customer page when order is ready
+- **User messages now trigger push notifications**: Staff messages to customers use identical push notification pattern as order-ready alerts (3 retry attempts with 2-second intervals)
 
 ## Environment Variables
 - `VAPID_PUBLIC_KEY` - Public key for web push notifications

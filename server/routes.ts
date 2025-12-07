@@ -355,9 +355,26 @@ export async function registerRoutes(
       
       await storage.addMessage(req.params.id, message);
       
+      // Always notify WebSocket subscribers (works on all devices including iOS)
       notifyOrderUpdate(req.params.id, "message");
       notifyAdminUpdate(req.params.id, "message");
       console.log(`[Message] Sent message to order ${req.params.id}: ${message}`);
+      
+      // Try to send push notifications if subscription exists (optional, best-effort)
+      if (order.subscription) {
+        // Send first push notification immediately
+        sendSinglePushNotification(req.params.id, message, 1).catch(() => {});
+        
+        // Send 2nd push notification after 2 seconds
+        setTimeout(() => {
+          sendSinglePushNotification(req.params.id, message, 2).catch(() => {});
+        }, 2000);
+        
+        // Send 3rd push notification after 4 seconds
+        setTimeout(() => {
+          sendSinglePushNotification(req.params.id, message, 3).catch(() => {});
+        }, 4000);
+      }
       
       res.json({ success: true });
     } catch (error) {
