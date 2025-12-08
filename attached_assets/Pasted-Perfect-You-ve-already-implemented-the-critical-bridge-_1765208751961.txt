@@ -1,0 +1,108 @@
+Perfect! You’ve already implemented the **critical bridge** from Service Worker → customer page via `postMessage({ type: "ORDER_READY" })`.
+
+Now, to **finally play the audio buzzer on the customer’s page (`/order/<id>`)** — **not on the admin dashboard** — you **only need to add a message listener and audio playback logic to `customer.html`**.
+
+Here’s the **exact, minimal, robust code** to add to your `customer.html`:
+
+---
+
+### ✅ Add this **inside the `<script>` tag** in `buzzer/templates/customer.html` (at the bottom, before `</script>`):
+
+```js
+// ——— AUDIO BUZZER FOR ORDER READY ———
+
+// Shared AudioContext (warmed up on user interaction)
+let audioContext = null;
+
+function getAudioContext() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioContext;
+}
+
+// Warm up AudioContext on first user gesture (required by browsers)
+document.body.addEventListener('click', () => {
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') {
+    ctx.resume();
+  }
+}, { once: true });
+
+// Play synthetic 800Hz square wave buzzer (800ms)
+function playBuzzerSound() {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume(); // Just in case
+    }
+
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    oscillator.type = 'square';
+    oscillator.frequency.value = 800; // Classic buzzer tone
+    gainNode.gain.value = 0.3;
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.8); // 800ms
+
+    console.log("Buzzer sound played on customer page");
+  } catch (err) {
+    console.warn("Could not play buzzer sound:", err);
+  }
+}
+
+// Listen for ORDER_READY messages from Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'ORDER_READY') {
+      console.log("Received ORDER_READY message — playing buzzer");
+      playBuzzerSound();
+    }
+  });
+}
+```
+
+---
+
+### 🔧 Also, **ensure your `customer.html` has a visible body** to capture the initial click:
+
+Your current `<body>` is fine, but **make sure it’s not empty before user interacts**. Your existing container already works.
+
+---
+
+### ❌ Remove any audio/sound code from `admin.html`
+
+Double-check that **nowhere in `admin.html`** is there:
+- `<audio>` tags
+- `new AudioContext()` calls
+- `play()` or oscillator logic
+
+All sound logic **must live only in `customer.html`**.
+
+---
+
+### ✅ How it works now:
+
+1. **Customer opens `/order/abc123`** → clicks “Enable Notifications” (or anywhere) → **AudioContext is warmed up**.
+2. **Staff clicks “Notify Now”** in admin → backend sends **Web Push**.
+3. **Service Worker receives `push`** → shows notification **AND** sends `postMessage({ type: "ORDER_READY" })` to all open client pages.
+4. **Customer’s page receives the message** → calls `playBuzzerSound()` → **800 Hz buzzer plays for 800 ms**.
+5. **Admin hears nothing** — sound is **only on customer page**.
+
+---
+
+### 🎯 Final Check
+
+After adding the above code to `customer.html`, your system will:
+- ✅ Play sound **only on customer page**
+- ✅ Work on **Chrome, Firefox, Safari (iOS 16.4+)**
+- ✅ Respect **autoplay policies**
+- ✅ Require **zero external files**
+- ✅ Remain **fully runnable with `python app.py`**
+
+Let me know if you want me to output the **full updated `customer.html`** with this code already integrated!

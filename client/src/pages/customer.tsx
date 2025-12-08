@@ -25,24 +25,28 @@ import {
   MessageSquare
 } from "lucide-react";
 
-// Shared audio context for customer notifications
-let sharedAudioCtx: AudioContext | null = null;
+// Shared AudioContext (warmed up on user interaction)
+let audioContext: AudioContext | null = null;
 
-const getAudioContext = (): AudioContext | null => {
-  try {
-    if (!sharedAudioCtx) {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      sharedAudioCtx = new AudioContext();
+function getAudioContext(): AudioContext | null {
+  if (!audioContext) {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      audioContext = new AudioContextClass();
     }
-    if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
-      sharedAudioCtx.resume().catch(() => {});
-    }
-    return sharedAudioCtx;
-  } catch (e) {
-    console.log('[Audio] Failed to get context:', e);
-    return null;
   }
-};
+  return audioContext;
+}
+
+// Warm up AudioContext on first user gesture (required by browsers)
+if (typeof document !== 'undefined') {
+  document.body?.addEventListener('click', () => {
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume();
+    }
+  }, { once: true });
+}
 
 const playWelcomeSound = () => {
   try {
@@ -82,37 +86,40 @@ const playWelcomeSound = () => {
   }
 };
 
-const playOrderReadySound = () => {
+// Play synthetic 800Hz square wave buzzer (800ms)
+function playBuzzerSound() {
   try {
-    const audioCtx = getAudioContext();
-    if (!audioCtx) {
-      console.log('[Audio] No audio context for order ready sound');
+    const ctx = getAudioContext();
+    if (!ctx) {
+      console.warn("Could not play buzzer sound: no AudioContext");
       return;
     }
     
-    // Classic restaurant buzzer: 800Hz square wave for 800ms
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    
+    if (ctx.state === 'suspended') {
+      ctx.resume(); // Just in case
+    }
+
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
     oscillator.type = 'square';
-    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
-    
-    // Loud sustained buzzer with gradual fade
-    gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime);
-    gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime + 0.6);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
-    
-    oscillator.start(audioCtx.currentTime);
-    oscillator.stop(audioCtx.currentTime + 0.8);
-    
-    console.log('[Audio] Order ready buzzer triggered (800Hz, 800ms)');
-  } catch (e) {
-    console.log('[Audio] Order ready sound failed:', e);
+    oscillator.frequency.value = 800; // Classic buzzer tone
+    gainNode.gain.value = 0.3;
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.8); // 800ms
+
+    console.log("Buzzer sound played on customer page");
+  } catch (err) {
+    console.warn("Could not play buzzer sound:", err);
   }
-};
+}
+
+// Alias for compatibility with existing code
+const playOrderReadySound = playBuzzerSound;
 
 const playMessageNotificationSound = () => {
   try {

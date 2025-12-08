@@ -5,36 +5,6 @@ import { useToast } from "@/hooks/use-toast";
 import { audioManager } from "@/lib/audio-manager";
 import type { Order } from "@shared/schema";
 
-// Audio utilities for reliable sounds across all devices
-const playBuzzer = () => {
-  try {
-    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    
-    oscillator.type = 'square';
-    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
-    
-    gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
-    
-    oscillator.start(audioCtx.currentTime);
-    oscillator.stop(audioCtx.currentTime + 0.2);
-    
-    oscillator.onended = () => {
-      oscillator.disconnect();
-      gainNode.disconnect();
-      audioCtx.close();
-    };
-  } catch (e) {
-    console.log('[Audio] Buzzer failed:', e);
-  }
-};
-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -514,7 +484,6 @@ function NotifyModal({
   
   const handleSubmit = () => {
     if (orderId) {
-      playBuzzer();
       onNotify(orderId, message);
       onClose();
       setMessage(DEFAULT_MESSAGE);
@@ -650,7 +619,6 @@ function ScheduleModal({
   
   const handleSubmit = () => {
     if (orderId && scheduledTime) {
-      playBuzzer();
       // Convert local datetime to ISO string for backend
       // datetime-local input returns "2025-12-01T21:00"
       // We need to convert it to proper ISO format
