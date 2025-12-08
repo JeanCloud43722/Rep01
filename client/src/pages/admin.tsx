@@ -206,10 +206,7 @@ function OrderCard({
             <>
               <Button 
                 size="sm" 
-                onClick={() => {
-                  playBuzzer();
-                  onTrigger(order.id);
-                }}
+                onClick={() => onTrigger(order.id)}
                 data-testid={`button-notify-${order.id}`}
               >
                 <Send className="h-4 w-4 mr-1" />
