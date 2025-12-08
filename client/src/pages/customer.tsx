@@ -25,6 +25,36 @@ import {
   MessageSquare
 } from "lucide-react";
 
+// Exact buzzer function used by staff - same audio notification signal
+const playBuzzer = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+    
+    gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    
+    oscillator.start(audioCtx.currentTime);
+    oscillator.stop(audioCtx.currentTime + 0.2);
+    
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      gainNode.disconnect();
+      audioCtx.close();
+    };
+  } catch (e) {
+    console.log('[Audio] Buzzer failed:', e);
+  }
+};
+
 // Shared audio context for customer notifications
 let sharedAudioCtx: AudioContext | null = null;
 
@@ -83,31 +113,9 @@ const playWelcomeSound = () => {
 };
 
 const playOrderReadySound = () => {
-  try {
-    const audioCtx = getAudioContext();
-    if (!audioCtx) return;
-    
-    // Loud buzzer for order ready - same as admin
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    
-    oscillator.type = 'square';
-    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
-    
-    gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
-    
-    oscillator.start(audioCtx.currentTime);
-    oscillator.stop(audioCtx.currentTime + 0.2);
-    
-    console.log('[Audio] Order ready sound triggered');
-  } catch (e) {
-    console.log('[Audio] Order ready sound failed:', e);
-  }
+  // Use the exact same buzzer as staff
+  playBuzzer();
+  console.log('[Audio] Order ready sound triggered');
 };
 
 const playMessageNotificationSound = () => {

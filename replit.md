@@ -92,11 +92,10 @@ npm run dev  # Start development server on port 5000
 - **Device capability detection**: Automatic strategy selection for iOS Safari/Android/Desktop
 - **Seamless audio auto-enable**: Audio is enabled on ANY user interaction (tap, scroll, click) anywhere on the page - no explicit button click needed
 - **Admin real-time alerts**: Staff receive audio/visual notifications for new registrations and service requests
-- **Fixed audio notifications for incoming messages**: Implemented shared, persistent AudioContext to reliably play:
-  - Loud 800Hz buzzer on "Notify Now", "Send Notification", and "Schedule Notification" (staff side)
+- **Unified notification audio**: Both staff and customers use identical audio signals for consistency:
+  - **Loud 800Hz buzzer** on "Notify Now", "Send Notification", "Schedule Notification" (staff side) and order-ready alerts (customer side)
   - Two-tone ascending chime (A5→C#6) for incoming customer messages
   - Three-tone welcome chime (C5→E5→G5) when customer arrives
-  - Order-ready buzzer on customer page when order is ready
 - **User messages now trigger push notifications**: Staff messages to customers use identical push notification pattern as order-ready alerts (3 retry attempts with 2-second intervals)
 - **Bidirectional Messaging**: Customers can send messages to staff directly from the order page (only when push is enabled); messages appear real-time in admin dashboard via WebSocket; reuses same Message data model for unified message history
 
