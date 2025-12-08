@@ -1,0 +1,62 @@
+Based on your chat history and the described problem, the **buzzer sound is currently playing on the admin/dashboard side** (wrongly) **instead of on the customer’s page (`/order/<id>`)** when a notification is triggered. The **goal** is to **play an audible buzzer sound directly in the customer’s browser** the moment their order is marked ready — **not on the admin panel**.
+
+The root issue (as your log confirms) is **audio context handling**: browsers block `AudioContext` creation unless triggered by a user gesture. So the sound must be **pre-initialized on the customer page**, then **triggered later via WebSocket or message event**.
+
+However, your current system uses **Web Push**, **not WebSockets** — so the sound **cannot be triggered by a push event alone**, because **push events happen in the Service Worker**, and **you cannot play audio from a Service Worker**.
+
+### ✅ Correct Technical Path:
+To play sound **on the customer page** when a **Web Push arrives**, you must:
+1. **Receive the push in the Service Worker** → show notification (already works).
+2. **Also send a “message” from the Service Worker to the client page** (via `clients.matchAll` + `client.postMessage`).
+3. **On the customer page**, listen for that message → then play the sound using a **pre-warmed AudioContext**.
+
+---
+
+### 🎯 Exact Prompt to Fix the Issue
+
+> **Add audible buzzer feedback on the customer page (`/order/<id>`) when their order is ready.**  
+>  
+> **Current problem**: The buzzer sound plays on the admin dashboard (incorrectly) or not at all on the customer side.  
+>  
+> **Required fix**:  
+> 1. **Remove any audio playback from `admin.html`** — staff should **not** hear the buzzer.  
+> 2. **On `customer.html`**, implement a **pre-warmed `AudioContext`** that is initialized on the user’s first tap/click (to satisfy browser autoplay policy).  
+> 3. **In `sw.js`**, when a push notification is received, **also send a message to all visible client pages** for that order using:  
+>    ```js
+>    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+>      clients.forEach(client => client.postMessage({ type: 'ORDER_READY' }));
+>    });
+>    ```  
+> 4. **In `customer.html`**, add an event listener for `message` events from the Service Worker:  
+>    ```js
+>    navigator.serviceWorker.addEventListener('message', event => {
+>      if (event.data?.type === 'ORDER_READY') {
+>        playBuzzerSound();
+>      }
+>    });
+>    ```  
+> 5. Implement `playBuzzerSound()` using a **shared, warmed-up AudioContext** that generates an **800 Hz square wave for 800 ms** (the classic buzzer).  
+>  
+> **Constraints**:  
+> - No external audio files — generate sound synthetically via Web Audio API.  
+> - Must work on **Chrome, Firefox, and Safari (iOS 16.4+)**.  
+> - Do **not** use WebSocket or polling — rely only on **existing Web Push + postMessage**.  
+> - The sound must play **even if the customer tab is in the background** (as long as the page is open).  
+>  
+> **Deliverables**:  
+> - Updated `customer.html` with audio context + message listener + buzzer function  
+> - Updated `sw.js` to send `postMessage({ type: 'ORDER_READY' })` alongside `showNotification()`  
+> - **No changes to `admin.html`** — remove any `<audio>` or JS sound triggers from it  
+>  
+> **Success test**:  
+> - Customer opens `/order/abc123` → enables push → clicks anywhere (to warm audio)  
+> - Staff clicks “Notify Now” in admin  
+> - Customer receives **both**:  
+>   ✅ Web Push notification  
+>   ✅ **Audible buzzer sound** on the `/order/abc123` page  
+
+---
+
+This prompt **exactly targets the missing link**: **bridging the Service Worker push event to in-page audio playback** via `postMessage`, while respecting browser security policies.
+
+Would you like me to generate the **exact code blocks** for `customer.html` and `sw.js` that implement this fix?

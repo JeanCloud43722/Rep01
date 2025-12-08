@@ -42,8 +42,17 @@ self.addEventListener("push", (event) => {
     }
   };
   
+  // Send message to all open client pages to trigger audio buzzer
   event.waitUntil(
-    self.registration.showNotification(data.title, options)
+    Promise.all([
+      self.registration.showNotification(data.title, options),
+      clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+        console.log("Sending ORDER_READY message to", clientList.length, "clients");
+        clientList.forEach((client) => {
+          client.postMessage({ type: "ORDER_READY", data: data });
+        });
+      })
+    ])
   );
 });
 

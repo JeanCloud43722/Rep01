@@ -90,7 +90,7 @@ const playOrderReadySound = () => {
       return;
     }
     
-    // Loud 800Hz square wave buzzer - same signal as staff uses
+    // Classic restaurant buzzer: 800Hz square wave for 800ms
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
     
@@ -100,14 +100,15 @@ const playOrderReadySound = () => {
     oscillator.type = 'square';
     oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
     
-    gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.15);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    // Loud sustained buzzer with gradual fade
+    gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime);
+    gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime + 0.6);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
     
     oscillator.start(audioCtx.currentTime);
-    oscillator.stop(audioCtx.currentTime + 0.2);
+    oscillator.stop(audioCtx.currentTime + 0.8);
     
-    console.log('[Audio] Order ready buzzer triggered');
+    console.log('[Audio] Order ready buzzer triggered (800Hz, 800ms)');
   } catch (e) {
     console.log('[Audio] Order ready sound failed:', e);
   }
@@ -481,6 +482,27 @@ export default function CustomerPage() {
       document.removeEventListener('click', handleInteraction);
     };
   }, [enableAudio]);
+  
+  // Listen for Service Worker messages (triggered by push notifications)
+  useEffect(() => {
+    if (!navigator.serviceWorker) return;
+    
+    const handleSwMessage = (event: MessageEvent) => {
+      console.log('[SW Message] Received:', event.data);
+      if (event.data?.type === 'ORDER_READY') {
+        console.log('[SW Message] ORDER_READY - playing buzzer');
+        playOrderReadySound();
+        // Also refresh order data
+        queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      }
+    };
+    
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, [orderId]);
   
   useEffect(() => {
     if (order && order.messages.length > lastMessageCountRef.current) {
