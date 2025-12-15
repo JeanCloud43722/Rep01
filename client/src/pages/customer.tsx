@@ -9,6 +9,7 @@ import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Check, 
@@ -757,28 +758,38 @@ export default function CustomerPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <input
+              <Input
                 type="text"
                 placeholder="Ask staff something..."
                 value={customerMessage}
                 onChange={(e) => setCustomerMessage(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === "Enter" && customerMessage.trim()) {
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && customerMessage.trim() && !customerMessageMutation.isPending) {
+                    e.preventDefault();
                     handleSendMessage();
                   }
                 }}
                 disabled={customerMessageMutation.isPending}
-                className="w-full px-3 py-2 border rounded-md text-sm"
                 data-testid="input-customer-message"
+                maxLength={200}
               />
               <Button
                 onClick={handleSendMessage}
                 disabled={!customerMessage.trim() || customerMessageMutation.isPending}
                 className="w-full"
-                size="sm"
                 data-testid="button-send-message"
               >
-                {customerMessageMutation.isPending ? "Sending..." : "Send to Staff"}
+                {customerMessageMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Send to Staff
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>
