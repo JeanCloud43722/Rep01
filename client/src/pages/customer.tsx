@@ -4,6 +4,7 @@ import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
 import { detectCapabilities } from "@/lib/device-capabilities";
+import { offlineStorage } from "@/lib/indexed-db-storage";
 import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
@@ -361,11 +362,46 @@ export default function CustomerPage() {
   const hasInitializedRef = useRef(false);
   const capabilities = detectCapabilities();
   
+  const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
+  const [dataEvicted, setDataEvicted] = useState(false);
+  
+  useEffect(() => {
+    if (!orderId) return;
+    
+    const loadCachedData = async () => {
+      try {
+        const evicted = await offlineStorage.checkEviction();
+        setDataEvicted(evicted);
+        
+        if (!evicted) {
+          const cached = await offlineStorage.getOrder(orderId);
+          if (cached) {
+            console.log('[Offline] Loaded cached order:', cached.id);
+            setCachedOrder(cached);
+          }
+        }
+      } catch (e) {
+        console.warn('[Offline] Failed to load cached data:', e);
+      }
+    };
+    
+    loadCachedData();
+  }, [orderId]);
+  
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
-    refetchInterval: 4000
+    refetchInterval: 4000,
+    initialData: cachedOrder || undefined
   });
+  
+  useEffect(() => {
+    if (order && orderId) {
+      offlineStorage.saveOrder(order).catch(e => {
+        console.warn('[Offline] Failed to save order:', e);
+      });
+    }
+  }, [order, orderId]);
   
   const enableAudio = useCallback(() => {
     if (audioEnabledRef.current && !audioFailed) return;
@@ -602,10 +638,22 @@ export default function CustomerPage() {
     if (!orderId) return;
     
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/orders?id=${orderId}`;
+    const clientId = localStorage.getItem(`ws_client_${orderId}_clientId`) || undefined;
+    const lastTimestamp = localStorage.getItem(`ws_client_${orderId}_timestamp`) || '0';
+    
+    const params = new URLSearchParams({
+      id: orderId,
+      ...(clientId && { clientId }),
+      lastTimestamp
+    });
+    const wsUrl = `${protocol}//${window.location.host}/ws/orders?${params}`;
     
     let ws: WebSocket | null = null;
     let reconnectTimeout: NodeJS.Timeout | null = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
+    const INITIAL_BACKOFF = 1000;
+    const MAX_BACKOFF = 30000;
     
     const connect = () => {
       try {
@@ -613,28 +661,64 @@ export default function CustomerPage() {
         
         ws.onopen = () => {
           console.log("[WS] Connected to order updates");
+          reconnectAttempts = 0;
         };
         
         ws.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-          console.log("[WS] Received:", message);
-          
-          if (message.type === "order_updated") {
-            const eventType = message.eventType as 'order_ready' | 'message' | 'offer' | 'status_update';
-            if (eventType) {
-              console.log(`[WS] Playing sound for event: ${eventType}`);
-              playSound(eventType);
-              
-              if (navigator.vibrate && eventType === 'order_ready') {
-                navigator.vibrate([200, 100, 200, 100, 200]);
-              }
+          try {
+            const message = JSON.parse(event.data);
+            console.log("[WS] Received:", message);
+            
+            if (message.type === "ping") {
+              ws?.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+              return;
             }
-            queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+            
+            if (message.type === "connected" && message.clientId) {
+              localStorage.setItem(`ws_client_${orderId}_clientId`, message.clientId);
+              if (message.serverTimestamp) {
+                localStorage.setItem(`ws_client_${orderId}_timestamp`, message.serverTimestamp.toString());
+              }
+              return;
+            }
+            
+            if (message.type === "sync_response" && message.order) {
+              queryClient.setQueryData(["/api/orders", orderId], message.order);
+              if (message.serverTimestamp) {
+                localStorage.setItem(`ws_client_${orderId}_timestamp`, message.serverTimestamp.toString());
+              }
+              return;
+            }
+            
+            if (message.type === "order_updated") {
+              if (message.serverTimestamp) {
+                localStorage.setItem(`ws_client_${orderId}_timestamp`, message.serverTimestamp.toString());
+              }
+              const eventType = message.eventType as 'order_ready' | 'message' | 'offer' | 'status_update';
+              if (eventType) {
+                console.log(`[WS] Playing sound for event: ${eventType}`);
+                playSound(eventType);
+                
+                if (navigator.vibrate && eventType === 'order_ready') {
+                  navigator.vibrate([200, 100, 200, 100, 200]);
+                }
+              }
+              queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+            }
+          } catch (e) {
+            console.warn("[WS] Failed to parse message:", e);
           }
         };
         
         ws.onclose = () => {
-          reconnectTimeout = setTimeout(connect, 3000);
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
+            reconnectAttempts++;
+            console.log(`[WS] Reconnecting in ${backoff}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+            reconnectTimeout = setTimeout(connect, backoff);
+          } else {
+            console.log("[WS] Max reconnect attempts reached");
+          }
         };
         
         ws.onerror = () => {
@@ -643,13 +727,34 @@ export default function CustomerPage() {
         };
       } catch (error) {
         console.error("[WS] Failed to connect:", error);
-        reconnectTimeout = setTimeout(connect, 3000);
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
+          reconnectAttempts++;
+          reconnectTimeout = setTimeout(connect, backoff);
+        }
       }
     };
     
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("[WS] Page became visible, checking connection");
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reconnectAttempts = 0;
+          connect();
+        } else {
+          ws.send(JSON.stringify({
+            type: 'sync_request',
+            lastTimestamp: parseInt(localStorage.getItem(`ws_client_${orderId}_timestamp`) || '0', 10)
+          }));
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     connect();
     
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };

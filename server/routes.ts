@@ -5,7 +5,26 @@ import webPush from "web-push";
 import schedule from "node-schedule";
 import { pushSubscriptionSchema } from "@shared/schema";
 import { z } from "zod";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
+
+// Extended WebSocket type with heartbeat tracking
+interface ExtendedWebSocket extends WebSocket {
+  isAlive: boolean;
+  clientId?: string;
+  orderId?: string;
+  lastMessageTimestamp?: number;
+}
+
+// Heartbeat configuration
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 5000; // 5 seconds to respond
+
+// Client session tracking for reconnection
+const clientSessions = new Map<string, {
+  orderId: string;
+  lastMessageTimestamp: number;
+  lastSeen: number;
+}>();
 
 function getVapidKeys() {
   let publicKey = process.env.VAPID_PUBLIC_KEY;
@@ -196,14 +215,32 @@ export async function registerRoutes(
   // Restore scheduled notifications on startup
   await restoreScheduledNotifications();
   
-  // Customer order WebSocket connections
-  wss.on("connection", (ws, req) => {
-    const url = req.url;
-    const orderId = url?.split("?id=")[1];
+  // Customer order WebSocket connections with heartbeat
+  wss.on("connection", (ws: ExtendedWebSocket, req) => {
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const orderId = url.searchParams.get("id");
+    const clientId = url.searchParams.get("clientId");
+    const lastTimestamp = url.searchParams.get("lastTimestamp");
     
     if (!orderId) {
       ws.close();
       return;
+    }
+    
+    // Initialize heartbeat tracking
+    ws.isAlive = true;
+    ws.orderId = orderId;
+    ws.clientId = clientId || undefined;
+    ws.lastMessageTimestamp = lastTimestamp ? parseInt(lastTimestamp, 10) : Date.now();
+    
+    // Update client session if clientId provided
+    if (clientId) {
+      clientSessions.set(clientId, {
+        orderId,
+        lastMessageTimestamp: ws.lastMessageTimestamp,
+        lastSeen: Date.now()
+      });
+      console.log(`[WebSocket] Client ${clientId} reconnected for order ${orderId}`);
     }
     
     // Add this connection to the order's subscribers
@@ -211,6 +248,44 @@ export async function registerRoutes(
       orderSubscribers.set(orderId, new Set());
     }
     orderSubscribers.get(orderId)!.add(ws);
+    
+    // Send connection acknowledgment with server timestamp
+    ws.send(JSON.stringify({
+      type: "connected",
+      orderId,
+      serverTimestamp: Date.now(),
+      clientId: clientId || `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    }));
+    
+    // Handle pong responses for heartbeat
+    ws.on("pong", () => {
+      ws.isAlive = true;
+    });
+    
+    // Handle incoming messages (including pong responses as text)
+    ws.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === "pong") {
+          ws.isAlive = true;
+        } else if (message.type === "sync_request") {
+          // Client is requesting missed messages since timestamp
+          ws.lastMessageTimestamp = message.lastTimestamp || Date.now();
+          // Send current order state
+          storage.getOrder(orderId).then(order => {
+            if (order) {
+              ws.send(JSON.stringify({
+                type: "sync_response",
+                order,
+                serverTimestamp: Date.now()
+              }));
+            }
+          });
+        }
+      } catch (e) {
+        // Ignore parse errors for binary pong frames
+      }
+    });
     
     ws.on("close", () => {
       const subscribers = orderSubscribers.get(orderId);
@@ -220,18 +295,98 @@ export async function registerRoutes(
           orderSubscribers.delete(orderId);
         }
       }
+      // Update last seen time for client session
+      if (ws.clientId) {
+        const session = clientSessions.get(ws.clientId);
+        if (session) {
+          session.lastSeen = Date.now();
+        }
+      }
+    });
+    
+    ws.on("error", (error) => {
+      console.error(`[WebSocket] Error for order ${orderId}:`, error.message);
     });
   });
   
-  // Admin dashboard WebSocket connections
-  adminWss.on("connection", (ws) => {
+  // Heartbeat interval for customer connections
+  const customerHeartbeat = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      const extWs = ws as ExtendedWebSocket;
+      if (!extWs.isAlive) {
+        console.log(`[WebSocket] Terminating unresponsive customer connection`);
+        return extWs.terminate();
+      }
+      extWs.isAlive = false;
+      // Send ping as JSON message (more reliable across platforms)
+      try {
+        extWs.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
+      } catch (e) {
+        // Connection may be closing
+      }
+    });
+  }, HEARTBEAT_INTERVAL);
+  
+  wss.on("close", () => {
+    clearInterval(customerHeartbeat);
+  });
+  
+  // Admin dashboard WebSocket connections with heartbeat
+  adminWss.on("connection", (ws: ExtendedWebSocket) => {
+    ws.isAlive = true;
     adminSubscribers.add(ws);
     console.log("[WebSocket] Admin client connected");
+    
+    // Send connection acknowledgment
+    ws.send(JSON.stringify({
+      type: "connected",
+      serverTimestamp: Date.now()
+    }));
+    
+    ws.on("pong", () => {
+      ws.isAlive = true;
+    });
+    
+    ws.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === "pong") {
+          ws.isAlive = true;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    });
     
     ws.on("close", () => {
       adminSubscribers.delete(ws);
       console.log("[WebSocket] Admin client disconnected");
     });
+    
+    ws.on("error", (error) => {
+      console.error("[WebSocket] Admin error:", error.message);
+    });
+  });
+  
+  // Heartbeat interval for admin connections
+  const adminHeartbeat = setInterval(() => {
+    adminWss.clients.forEach((ws) => {
+      const extWs = ws as ExtendedWebSocket;
+      if (!extWs.isAlive) {
+        console.log(`[WebSocket] Terminating unresponsive admin connection`);
+        return extWs.terminate();
+      }
+      extWs.isAlive = false;
+      try {
+        extWs.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
+      } catch (e) {
+        // Connection may be closing
+      }
+    });
+  }, HEARTBEAT_INTERVAL);
+  
+  adminWss.on("close", () => {
+    clearInterval(adminHeartbeat);
   });
   
   app.get("/api/vapid-public-key", (req, res) => {

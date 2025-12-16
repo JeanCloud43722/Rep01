@@ -806,68 +806,107 @@ export default function AdminPage() {
     
     let ws: WebSocket | null = null;
     let reconnectTimeout: NodeJS.Timeout | null = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
+    const INITIAL_BACKOFF = 1000;
+    const MAX_BACKOFF = 30000;
     
     const connect = () => {
       try {
         ws = new WebSocket(wsUrl);
         
         ws.onopen = () => {
-          console.log("Connected to admin updates");
+          console.log("[Admin WS] Connected to admin updates");
+          reconnectAttempts = 0;
         };
         
         ws.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-          console.log("[Admin WS] Received:", message);
-          
-          if (message.type === "admin_update") {
-            const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed';
-            if (eventType) {
-              console.log(`[Admin WS] Playing sound for event: ${eventType}`);
-              playStaffSound(eventType);
-              
-              if (navigator.vibrate) {
-                navigator.vibrate([200, 100, 200]);
+          try {
+            const message = JSON.parse(event.data);
+            
+            if (message.type === "ping") {
+              ws?.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+              return;
+            }
+            
+            if (message.type === "connected") {
+              console.log("[Admin WS] Connection acknowledged");
+              return;
+            }
+            
+            console.log("[Admin WS] Received:", message);
+            
+            if (message.type === "admin_update") {
+              const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed';
+              if (eventType) {
+                console.log(`[Admin WS] Playing sound for event: ${eventType}`);
+                playStaffSound(eventType);
+                
+                if (navigator.vibrate) {
+                  navigator.vibrate([200, 100, 200]);
+                }
               }
+              
+              if (message.eventType === "service_request") {
+                toast({
+                  title: "Service Request",
+                  description: `Order ${message.orderId} needs assistance`,
+                  variant: "destructive"
+                });
+              } else if (message.eventType === "new_registration") {
+                toast({
+                  title: "New Customer",
+                  description: `Order ${message.orderId} customer arrived`,
+                });
+              }
+              
+              queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
             }
-            
-            if (message.eventType === "service_request") {
-              toast({
-                title: "Service Request",
-                description: `Order ${message.orderId} needs assistance`,
-                variant: "destructive"
-              });
-            } else if (message.eventType === "new_registration") {
-              toast({
-                title: "New Customer",
-                description: `Order ${message.orderId} customer arrived`,
-              });
-            }
-            
-            queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+          } catch (e) {
+            console.warn("[Admin WS] Failed to parse message:", e);
           }
         };
         
         ws.onclose = () => {
-          reconnectTimeout = setTimeout(connect, 3000);
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
+            reconnectAttempts++;
+            console.log(`[Admin WS] Reconnecting in ${backoff}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+            reconnectTimeout = setTimeout(connect, backoff);
+          }
         };
         
         ws.onerror = () => {
-          console.error("Admin WebSocket error");
+          console.error("[Admin WS] WebSocket error");
           ws?.close();
         };
       } catch (error) {
-        console.error("Failed to connect to admin WebSocket:", error);
-        reconnectTimeout = setTimeout(connect, 3000);
+        console.error("[Admin WS] Failed to connect:", error);
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
+          reconnectAttempts++;
+          reconnectTimeout = setTimeout(connect, backoff);
+        }
       }
     };
     
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && (!ws || ws.readyState !== WebSocket.OPEN)) {
+        console.log("[Admin WS] Page became visible, reconnecting...");
+        reconnectAttempts = 0;
+        connect();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     connect();
     
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [toast, audioEnabled]);
+  }, [toast, audioEnabled, playStaffSound]);
   
   const createOrderMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/orders"),

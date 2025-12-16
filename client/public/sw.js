@@ -1,11 +1,68 @@
+const CACHE_NAME = 'restaurant-buzzer-v1';
+const STATIC_ASSETS = [
+  '/',
+  '/favicon.png',
+  '/manifest.json'
+];
+
 self.addEventListener("install", (event) => {
   console.log("Service Worker installed");
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log("Caching static assets");
+      return cache.addAll(STATIC_ASSETS).catch((err) => {
+        console.warn("Failed to cache some assets:", err);
+      });
+    })
+  );
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   console.log("Service Worker activated");
-  event.waitUntil(clients.claim());
+  event.waitUntil(
+    Promise.all([
+      clients.claim(),
+      caches.keys().then((cacheNames) => {
+        return Promise.all(
+          cacheNames
+            .filter((name) => name !== CACHE_NAME)
+            .map((name) => {
+              console.log("Deleting old cache:", name);
+              return caches.delete(name);
+            })
+        );
+      })
+    ])
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  
+  const url = new URL(event.request.url);
+  
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/ws/")) {
+    return;
+  }
+  
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      const fetched = fetch(event.request).then((response) => {
+        if (response && response.status === 200 && response.type === "basic") {
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return response;
+      }).catch(() => {
+        return cached;
+      });
+      
+      return cached || fetched;
+    })
+  );
 });
 
 self.addEventListener("push", (event) => {
@@ -36,13 +93,11 @@ self.addEventListener("push", (event) => {
     renotify: true,
     requireInteraction: true,
     silent: false,
-    sound: "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAAA=",
     data: {
       url: data.url || "/"
     }
   };
   
-  // Send message to all open client pages to trigger audio buzzer
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(data.title, options),
@@ -75,4 +130,10 @@ self.addEventListener("notificationclick", (event) => {
         }
       })
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });

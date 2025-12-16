@@ -99,6 +99,16 @@ npm run dev  # Start development server on port 5000
 - **User messages now trigger push notifications**: Staff messages to customers use identical push notification pattern as order-ready alerts (3 retry attempts with 2-second intervals)
 - **Bidirectional Messaging**: Customers can send messages to staff directly from the order page (only when push is enabled); messages appear real-time in admin dashboard via WebSocket; reuses same Message data model for unified message history
 
+### Robust Cross-Platform Messaging Update
+- **WebSocket Heartbeat/Keep-Alive**: Server sends ping every 30 seconds, clients respond with pong. Unresponsive connections terminated after timeout.
+- **Client ID Management**: Session persistence for reconnection with last message timestamp tracking for missed message sync.
+- **Exponential Backoff Reconnection**: 1s→2s→4s→8s→...→30s max delay, up to 10 attempts before giving up.
+- **Page Visibility API Integration**: Automatic connection health check and sync request when page becomes visible (critical for iOS background throttling).
+- **IndexedDB Offline Storage**: Message persistence with iOS data eviction detection and server-reload fallback.
+- **QR Code Scanner Component**: html5-qrcode library with getUserMedia() for live scanning + photo upload fallback for iOS camera permission issues.
+- **PWA Support**: manifest.json with standalone display, Service Worker caching for offline access, Apple meta tags for iOS.
+- **iOS Install Prompt**: Native-style overlay guiding iOS Safari users to "Add to Home Screen" for best experience.
+
 ## Environment Variables
 - `VAPID_PUBLIC_KEY` - Public key for web push notifications
 - `VAPID_PRIVATE_KEY` - Private key for web push notifications
