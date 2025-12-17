@@ -14,6 +14,8 @@ interface AudioCueConfig {
 
 type UnlockListener = (isUnlocked: boolean) => void;
 
+const AUDIO_UNLOCK_KEY = 'audio_manager_unlocked';
+
 class AudioManager {
   private static instance: AudioManager;
   private audioContext: AudioContext | null = null;
@@ -23,7 +25,36 @@ class AudioManager {
   private silentAudio: HTMLAudioElement | null = null;
   private unlockListeners: Set<UnlockListener> = new Set();
   
-  private constructor() {}
+  private constructor() {
+    if (typeof window !== 'undefined' && localStorage.getItem(AUDIO_UNLOCK_KEY) === 'true') {
+      this.tryRestoreUnlock();
+    }
+  }
+  
+  private tryRestoreUnlock(): void {
+    try {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      if (this.audioContext.state === 'running') {
+        this._isUnlocked = true;
+        this.isWarmedUp = true;
+        console.log('Audio Manager: Restored unlock state from localStorage');
+        setTimeout(() => this.notifyUnlockListeners(), 0);
+      } else if (this.audioContext.state === 'suspended') {
+        console.log('Audio Manager: AudioContext suspended - user gesture required');
+        this.audioContext.onstatechange = () => {
+          if (this.audioContext?.state === 'running') {
+            this._isUnlocked = true;
+            this.isWarmedUp = true;
+            console.log('Audio Manager: AudioContext resumed after state change');
+            this.notifyUnlockListeners();
+          }
+        };
+      }
+    } catch (e) {
+      console.log('Audio Manager: Could not restore unlock state', e);
+    }
+  }
   
   onUnlockChange(listener: UnlockListener): () => void {
     this.unlockListeners.add(listener);
@@ -82,6 +113,7 @@ class AudioManager {
       
       this._isUnlocked = true;
       this.isWarmedUp = true;
+      localStorage.setItem(AUDIO_UNLOCK_KEY, 'true');
       console.log('Audio Manager: iOS audio unlocked via user gesture');
       this.notifyUnlockListeners();
       return true;
