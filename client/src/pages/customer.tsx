@@ -224,6 +224,12 @@ export default function CustomerPage() {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
   const [audioUnlocked, setAudioUnlocked] = useState(() => audioManager.isUnlocked);
+  const [hasAudioConsent, setHasAudioConsent] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('audio_manager_unlocked') === 'true';
+    }
+    return false;
+  });
   const [pushEnabled, setPushEnabled] = useState(false);
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
@@ -282,6 +288,7 @@ export default function CustomerPage() {
   
   const handleAudioUnlock = useCallback(() => {
     setAudioUnlocked(true);
+    setHasAudioConsent(true);
     console.log('[Audio] Audio unlock callback, syncing state');
     
     if (queuedNotificationsRef.current.length > 0) {
@@ -631,7 +638,7 @@ export default function CustomerPage() {
   
   return (
     <>
-      {!audioUnlocked && <AudioUnlockOverlay onUnlock={handleAudioUnlock} />}
+      {!audioUnlocked && !hasAudioConsent && <AudioUnlockOverlay onUnlock={handleAudioUnlock} />}
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="max-w-md w-full space-y-6">
         <div className="text-center space-y-2 relative">
@@ -717,7 +724,7 @@ export default function CustomerPage() {
           </Card>
         )}
 
-        {(audioUnlocked || pushEnabled) && (
+        {(hasAudioConsent || audioUnlocked || pushEnabled) && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -765,10 +772,20 @@ export default function CustomerPage() {
         
         <div className={`flex items-center justify-center gap-2 text-xs flex-wrap ${!audioUnlocked ? 'text-amber-600' : 'text-muted-foreground'}`}>
           {!audioUnlocked ? (
-            <>
+            <button 
+              onClick={async () => {
+                const success = await audioManager.unlock();
+                if (success) {
+                  setAudioUnlocked(true);
+                  setHasAudioConsent(true);
+                }
+              }}
+              className="flex items-center gap-1 underline hover:no-underline"
+              data-testid="button-reactivate-audio"
+            >
               <VolumeX className="h-3 w-3" />
-              <span className="font-medium">Audio activation required</span>
-            </>
+              <span className="font-medium">Tap to enable sound alerts</span>
+            </button>
           ) : (
             <>
               <Volume2 className="h-3 w-3 text-green-600" />
