@@ -109,6 +109,14 @@ npm run dev  # Start development server on port 5000
 - **PWA Support**: manifest.json with standalone display, Service Worker caching for offline access, Apple meta tags for iOS.
 - **iOS Install Prompt**: Native-style overlay guiding iOS Safari users to "Add to Home Screen" for best experience.
 
+### iOS Audio-First Notification System
+- **Mandatory Audio Unlock Overlay**: Full-screen overlay blocks customer page until user explicitly activates audio
+- **User-Gesture-Unlock Pattern**: On button click, plays silent 0.1s oscillator + HTMLAudioElement to prime AudioContext for iOS Safari
+- **Global Unlock State**: AudioManager singleton tracks `isUnlocked` flag; all sound triggers use `playIfUnlocked()` method
+- **Background Message Queue**: Notifications received while page is hidden are queued and played sequentially when page becomes visible
+- **iOS Hardware Warnings**: Prominent tips about mute switch, Do Not Disturb mode, and volume level in unlock overlay
+- **Catch-Up Sounds**: After audio unlock, any queued notifications are played with 300ms spacing to avoid audio collision
+
 ## Environment Variables
 - `VAPID_PUBLIC_KEY` - Public key for web push notifications
 - `VAPID_PRIVATE_KEY` - Private key for web push notifications

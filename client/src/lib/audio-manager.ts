@@ -12,19 +12,83 @@ interface AudioCueConfig {
   duration: number;
 }
 
+type UnlockListener = (isUnlocked: boolean) => void;
+
 class AudioManager {
   private static instance: AudioManager;
   private audioContext: AudioContext | null = null;
   private isWarmedUp = false;
+  private _isUnlocked = false;
   private volume = 0.7;
+  private silentAudio: HTMLAudioElement | null = null;
+  private unlockListeners: Set<UnlockListener> = new Set();
   
   private constructor() {}
+  
+  onUnlockChange(listener: UnlockListener): () => void {
+    this.unlockListeners.add(listener);
+    listener(this._isUnlocked);
+    return () => this.unlockListeners.delete(listener);
+  }
+  
+  private notifyUnlockListeners(): void {
+    this.unlockListeners.forEach(listener => listener(this._isUnlocked));
+  }
   
   static getInstance(): AudioManager {
     if (!AudioManager.instance) {
       AudioManager.instance = new AudioManager();
     }
     return AudioManager.instance;
+  }
+  
+  get isUnlocked(): boolean {
+    return this._isUnlocked;
+  }
+  
+  async unlock(): Promise<boolean> {
+    if (this._isUnlocked) return true;
+    
+    try {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      
+      const oscillator = this.audioContext.createOscillator();
+      const gainNode = this.audioContext.createGain();
+      
+      gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+      oscillator.connect(gainNode);
+      gainNode.connect(this.audioContext.destination);
+      
+      oscillator.start(this.audioContext.currentTime);
+      oscillator.stop(this.audioContext.currentTime + 0.1);
+      
+      if (!this.silentAudio) {
+        this.silentAudio = new Audio();
+        this.silentAudio.setAttribute('playsinline', 'true');
+        this.silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      }
+      
+      try {
+        await this.silentAudio.play();
+        this.silentAudio.pause();
+        this.silentAudio.currentTime = 0;
+      } catch (e) {
+        console.log('Audio Manager: HTMLAudioElement fallback silent play', e);
+      }
+      
+      this._isUnlocked = true;
+      this.isWarmedUp = true;
+      console.log('Audio Manager: iOS audio unlocked via user gesture');
+      this.notifyUnlockListeners();
+      return true;
+    } catch (error) {
+      console.error('Audio Manager: Failed to unlock audio', error);
+      return false;
+    }
   }
   
   warmUp(): void {
@@ -306,7 +370,23 @@ class AudioManager {
     }
   }
   
+  playIfUnlocked(cue: SoundCue): boolean {
+    if (!this._isUnlocked) {
+      console.warn('Audio Manager: Cannot play - audio not unlocked. User gesture required.');
+      return false;
+    }
+    return this.play(cue);
+  }
+  
   playWithDelay(cue: SoundCue, delayMs: number): void {
+    setTimeout(() => this.play(cue), delayMs);
+  }
+  
+  playIfUnlockedWithDelay(cue: SoundCue, delayMs: number): void {
+    if (!this._isUnlocked) {
+      console.warn('Audio Manager: Cannot play - audio not unlocked. User gesture required.');
+      return;
+    }
     setTimeout(() => this.play(cue), delayMs);
   }
 }
@@ -315,10 +395,14 @@ export const audioManager = AudioManager.getInstance();
 
 export function useAudioManager() {
   const warmUp = () => audioManager.warmUp();
+  const unlock = () => audioManager.unlock();
+  const isUnlocked = () => audioManager.isUnlocked;
   const play = (cue: SoundCue) => audioManager.play(cue);
+  const playIfUnlocked = (cue: SoundCue) => audioManager.playIfUnlocked(cue);
   const playWithDelay = (cue: SoundCue, delayMs: number) => audioManager.playWithDelay(cue, delayMs);
+  const playIfUnlockedWithDelay = (cue: SoundCue, delayMs: number) => audioManager.playIfUnlockedWithDelay(cue, delayMs);
   const setVolume = (level: number) => audioManager.setVolume(level);
   const getVolume = () => audioManager.getVolume();
   
-  return { warmUp, play, playWithDelay, setVolume, getVolume };
+  return { warmUp, unlock, isUnlocked, play, playIfUnlocked, playWithDelay, playIfUnlockedWithDelay, setVolume, getVolume };
 }

@@ -6,6 +6,7 @@ import { audioManager } from "@/lib/audio-manager";
 import { detectCapabilities } from "@/lib/device-capabilities";
 import { offlineStorage } from "@/lib/indexed-db-storage";
 import { useToast } from "@/hooks/use-toast";
+import { AudioUnlockOverlay } from "@/components/audio-unlock-overlay";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,143 +25,13 @@ import {
   Bell,
   Volume2,
   VolumeX,
-  MessageSquare
+  MessageSquare,
+  Smartphone
 } from "lucide-react";
 
-// Shared AudioContext (warmed up on user interaction)
-let audioContext: AudioContext | null = null;
-
-function getAudioContext(): AudioContext | null {
-  if (!audioContext) {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContextClass) {
-      audioContext = new AudioContextClass();
-    }
-  }
-  return audioContext;
-}
-
-// Warm up AudioContext on first user gesture (required by browsers)
-if (typeof document !== 'undefined') {
-  document.body?.addEventListener('click', () => {
-    const ctx = getAudioContext();
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume();
-    }
-  }, { once: true });
-}
-
-const playWelcomeSound = () => {
-  try {
-    const audioCtx = getAudioContext();
-    if (!audioCtx) return;
-    const now = audioCtx.currentTime;
-    
-    // Friendly three-tone welcome chime
-    const playTone = (freq: number, startTime: number, duration: number) => {
-      const osc = audioCtx!.createOscillator();
-      const gain = audioCtx!.createGain();
-      
-      osc.connect(gain);
-      gain.connect(audioCtx!.destination);
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, startTime);
-      
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(0.4, startTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-      
-      osc.start(startTime);
-      osc.stop(startTime + duration);
-      
-      return { osc, gain };
-    };
-    
-    // Three ascending tones - friendly welcome
-    playTone(523, now, 0.2);          // C5
-    playTone(659, now + 0.15, 0.2);  // E5
-    playTone(784, now + 0.30, 0.25); // G5
-    
-    console.log('[Audio] Welcome sound triggered');
-  } catch (e) {
-    console.log('[Audio] Welcome sound failed:', e);
-  }
-};
-
-// Play synthetic 800Hz square wave buzzer (800ms)
-function playBuzzerSound() {
-  try {
-    const ctx = getAudioContext();
-    if (!ctx) {
-      console.warn("Could not play buzzer sound: no AudioContext");
-      return;
-    }
-    
-    if (ctx.state === 'suspended') {
-      ctx.resume(); // Just in case
-    }
-
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-
-    oscillator.type = 'square';
-    oscillator.frequency.value = 800; // Classic buzzer tone
-    gainNode.gain.value = 0.3;
-
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.8); // 800ms
-
-    console.log("Buzzer sound played on customer page");
-  } catch (err) {
-    console.warn("Could not play buzzer sound:", err);
-  }
-}
-
-// Alias for compatibility with existing code
-const playOrderReadySound = playBuzzerSound;
-
-const playMessageNotificationSound = () => {
-  try {
-    const audioCtx = getAudioContext();
-    if (!audioCtx) {
-      console.log('[Audio] No audio context available for message sound');
-      return;
-    }
-    const now = audioCtx.currentTime;
-    
-    // Classic two-tone message chime
-    const playTone = (freq: number, startTime: number, duration: number) => {
-      const osc = audioCtx!.createOscillator();
-      const gain = audioCtx!.createGain();
-      
-      osc.connect(gain);
-      gain.connect(audioCtx!.destination);
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, startTime);
-      
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-      
-      osc.start(startTime);
-      osc.stop(startTime + duration);
-      
-      return { osc, gain };
-    };
-    
-    // Two ascending tones - classic message sound
-    playTone(880, now, 0.15);        // A5
-    playTone(1108, now + 0.12, 0.2); // C#6
-    
-    console.log('[Audio] Message notification sound triggered');
-  } catch (e) {
-    console.log('[Audio] Message sound failed:', e);
-  }
+type QueuedNotification = {
+  type: 'order_ready' | 'message' | 'offer' | 'status_update';
+  timestamp: number;
 };
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -352,15 +223,21 @@ export default function CustomerPage() {
   const [hasRegistered, setHasRegistered] = useState(false);
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
-  const [audioEnabled, setAudioEnabled] = useState(true); // Start as enabled
+  const [audioUnlocked, setAudioUnlocked] = useState(() => audioManager.isUnlocked);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [audioFailed, setAudioFailed] = useState(false);
-  const audioEnabledRef = useRef(true); // Start as enabled
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
-  const hasShownAudioWarning = useRef(false);
   const hasInitializedRef = useRef(false);
   const capabilities = detectCapabilities();
+  const queuedNotificationsRef = useRef<QueuedNotification[]>([]);
+  const isPageVisibleRef = useRef(true);
+  
+  useEffect(() => {
+    const unsubscribe = audioManager.onUnlockChange((isUnlocked) => {
+      setAudioUnlocked(isUnlocked);
+    });
+    return unsubscribe;
+  }, []);
   
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
   const [dataEvicted, setDataEvicted] = useState(false);
@@ -403,16 +280,23 @@ export default function CustomerPage() {
     }
   }, [order, orderId]);
   
-  const enableAudio = useCallback(() => {
-    if (audioEnabledRef.current && !audioFailed) return;
+  const handleAudioUnlock = useCallback(() => {
+    setAudioUnlocked(true);
+    console.log('[Audio] Audio unlock callback, syncing state');
     
-    console.log('[Audio] Enabling audio...');
-    audioManager.warmUp();
-    audioEnabledRef.current = true;
-    setAudioEnabled(true);
-    setAudioFailed(false);
-    hasShownAudioWarning.current = false;
-  }, [audioFailed]);
+    if (queuedNotificationsRef.current.length > 0) {
+      console.log(`[Audio] Playing ${queuedNotificationsRef.current.length} queued notifications`);
+      queuedNotificationsRef.current.forEach((notification, index) => {
+        setTimeout(() => {
+          const cue = notification.type === 'order_ready' ? 'order-ready' : 
+                      notification.type === 'message' ? 'message' :
+                      notification.type === 'offer' ? 'offer' : 'status-update';
+          audioManager.playIfUnlocked(cue);
+        }, index * 500);
+      });
+      queuedNotificationsRef.current = [];
+    }
+  }, []);
   
   const subscribeToPush = async () => {
     if (!orderId) return;
@@ -460,72 +344,51 @@ export default function CustomerPage() {
   };
   
   const playSound = useCallback((type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
-    console.log(`[Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabledRef.current}`);
+    console.log(`[Audio] Playing sound for: ${type}, isUnlocked: ${audioManager.isUnlocked}, isVisible: ${isPageVisibleRef.current}`);
     
-    // If audio context needs warmup, try now
-    if (!audioEnabledRef.current) {
-      enableAudio();
+    if (!isPageVisibleRef.current) {
+      queuedNotificationsRef.current.push({ type, timestamp: Date.now() });
+      console.log('[Audio] Page hidden, queued notification for later playback');
+      return;
     }
     
-    let success = false;
-    switch (type) {
-      case 'order_ready':
-        playOrderReadySound();
-        success = true;
-        break;
-      case 'message':
-        playMessageNotificationSound();
-        success = true;
-        break;
-      case 'offer':
-        success = audioManager.play('offer');
-        break;
-      case 'status_update':
-        success = audioManager.play('status-update');
-        break;
+    if (!audioManager.isUnlocked) {
+      queuedNotificationsRef.current.push({ type, timestamp: Date.now() });
+      console.log('[Audio] Audio not unlocked, queued notification');
+      return;
     }
     
-    // If audio failed, show warning only once
-    if (!success && !hasShownAudioWarning.current && !audioEnabledRef.current) {
-      hasShownAudioWarning.current = true;
-      setAudioFailed(true);
-      toast({
-        title: "Audio blocked",
-        description: "Tap anywhere on the page to enable sound alerts",
-      });
-    }
-  }, [enableAudio, toast]);
+    const cue = type === 'order_ready' ? 'order-ready' : 
+                type === 'message' ? 'message' :
+                type === 'offer' ? 'offer' : 'status-update';
+    
+    audioManager.playIfUnlocked(cue);
+  }, []);
   
-  // Initialize audio and push notifications on mount
   useEffect(() => {
-    if (hasInitializedRef.current) return;
-    hasInitializedRef.current = true;
-    
-    console.log('[Init] Initializing audio and push notifications...');
-    enableAudio();
-    
-    // Request push permissions automatically
-    if (orderId) {
-      subscribeToPush();
-    }
-  }, [orderId, enableAudio]);
-  
-  // Fallback: Also enable on user interaction for browsers with strict autoplay policies
-  useEffect(() => {
-    const handleInteraction = () => {
-      enableAudio();
-      document.removeEventListener('touchstart', handleInteraction);
-      document.removeEventListener('click', handleInteraction);
+    const handleVisibilityChange = () => {
+      const wasHidden = !isPageVisibleRef.current;
+      isPageVisibleRef.current = document.visibilityState === 'visible';
+      
+      if (isPageVisibleRef.current && wasHidden && audioManager.isUnlocked) {
+        if (queuedNotificationsRef.current.length > 0) {
+          console.log(`[Audio] Page became visible, playing ${queuedNotificationsRef.current.length} queued sounds`);
+          queuedNotificationsRef.current.forEach((notification, index) => {
+            setTimeout(() => {
+              const cue = notification.type === 'order_ready' ? 'order-ready' : 
+                          notification.type === 'message' ? 'message' :
+                          notification.type === 'offer' ? 'offer' : 'status-update';
+              audioManager.playIfUnlocked(cue);
+            }, index * 300);
+          });
+          queuedNotificationsRef.current = [];
+        }
+      }
     };
     
-    document.addEventListener('touchstart', handleInteraction, { passive: true });
-    document.addEventListener('click', handleInteraction);
-    
-    return () => {
-      document.removeEventListener('touchstart', handleInteraction);
-      document.removeEventListener('click', handleInteraction);
-    };
-  }, [enableAudio]);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
   
   // Listen for Service Worker messages (triggered by push notifications)
   useEffect(() => {
@@ -535,8 +398,7 @@ export default function CustomerPage() {
       console.log('[SW Message] Received:', event.data);
       if (event.data?.type === 'ORDER_READY') {
         console.log('[SW Message] ORDER_READY - playing buzzer');
-        playOrderReadySound();
-        // Also refresh order data
+        playSound('order_ready');
         queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       }
     };
@@ -585,7 +447,7 @@ export default function CustomerPage() {
     },
     onSuccess: () => {
       setHasRegistered(true);
-      playWelcomeSound();
+      audioManager.playIfUnlocked('message');
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     }
   });
@@ -614,7 +476,6 @@ export default function CustomerPage() {
   });
   
   const handleRequestService = () => {
-    enableAudio();
     serviceRequestMutation.mutate();
   };
   
@@ -769,8 +630,10 @@ export default function CustomerPage() {
   }
   
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-6">
+    <>
+      {!audioUnlocked && <AudioUnlockOverlay onUnlock={handleAudioUnlock} />}
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-6">
         <div className="text-center space-y-2 relative">
           <div className="flex items-center justify-center gap-2">
             <Badge variant="outline" className="font-mono text-sm px-3 py-1" data-testid="badge-order-id">
@@ -900,11 +763,11 @@ export default function CustomerPage() {
           </Card>
         )}
         
-        <div className={`flex items-center justify-center gap-2 text-xs flex-wrap ${audioFailed ? 'text-amber-600 animate-pulse' : 'text-muted-foreground'}`}>
-          {audioFailed ? (
+        <div className={`flex items-center justify-center gap-2 text-xs flex-wrap ${!audioUnlocked ? 'text-amber-600' : 'text-muted-foreground'}`}>
+          {!audioUnlocked ? (
             <>
               <VolumeX className="h-3 w-3" />
-              <span className="font-medium">Tap anywhere to enable sound</span>
+              <span className="font-medium">Audio activation required</span>
             </>
           ) : (
             <>
@@ -930,7 +793,8 @@ export default function CustomerPage() {
         <p className="text-center text-xs text-muted-foreground px-4">
           Keep this page open to receive alerts when your order is ready
         </p>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
