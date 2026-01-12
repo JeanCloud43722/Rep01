@@ -20,7 +20,6 @@ import {
   CheckCircle2,
   Calendar,
   Send,
-  Gift,
   Bell,
   Volume2,
   VolumeX,
@@ -130,17 +129,15 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
           </div>
           
           <div className="space-y-2">
-            <h3 className="text-xl font-semibold" data-testid="text-status-title">{statusConfig.title}</h3>
-            <p className="text-muted-foreground" data-testid="text-status-description">
-              {statusConfig.description}
-            </p>
+            <h3 className="text-xl font-semibold">{statusConfig.title}</h3>
+            <p className="text-muted-foreground">{statusConfig.description}</p>
           </div>
           
           {order.scheduledTime && order.status === "scheduled" && (
             <div className="flex flex-col items-center gap-2">
               <div className="flex items-center gap-2 text-lg font-semibold text-primary bg-primary/10 rounded-lg px-4 py-3 w-full">
                 <Clock className="h-5 w-5" />
-                <span data-testid="text-remaining-time">{remainingTime}</span>
+                <span>{remainingTime}</span>
               </div>
               <p className="text-xs text-muted-foreground">Ready at {formatTime(order.scheduledTime)}</p>
             </div>
@@ -157,13 +154,8 @@ function SubscribedCard({ order, onRequestService, isRequestingService }: { orde
             onClick={onRequestService}
             disabled={isRequestingService}
             className="mt-4 w-full max-w-xs"
-            data-testid="button-request-service"
           >
-            {isRequestingService ? (
-              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-            ) : (
-              <AlertCircle className="h-5 w-5 mr-2" />
-            )}
+            {isRequestingService ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <AlertCircle className="h-5 w-5 mr-2" />}
             {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
           </Button>
         </div>
@@ -220,15 +212,7 @@ export default function CustomerPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
   const [hasRegistered, setHasRegistered] = useState(false);
-  const [hasNewMessage, setHasNewMessage] = useState(false);
-  const [newMessageId, setNewMessageId] = useState<string | null>(null);
   const [audioUnlocked, setAudioUnlocked] = useState(() => audioManager.isUnlocked);
-  const [hasAudioConsent, setHasAudioConsent] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('audio_manager_unlocked') === 'true';
-    }
-    return false;
-  });
   const [pushEnabled, setPushEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
       return Notification.permission === 'granted';
@@ -236,298 +220,157 @@ export default function CustomerPage() {
     return false;
   });
   const lastMessageCountRef = useRef<number>(0);
-  const messagesCardRef = useRef<HTMLDivElement>(null);
-  const hasInitializedRef = useRef(false);
-  const capabilities = detectCapabilities();
-  const queuedNotificationsRef = useRef<QueuedNotification[]>([]);
-  const isPageVisibleRef = useRef(true);
-  
-  useEffect(() => {
-    const unsubscribe = audioManager.onUnlockChange((isUnlocked) => {
-      setAudioUnlocked(isUnlocked);
-    });
-    return unsubscribe;
-  }, []);
-  
-  // Auto-enable audio and push notifications on first user interaction (tap anywhere)
-  useEffect(() => {
-    // Skip if already unlocked
-    if (audioManager.isUnlocked) {
-      setAudioUnlocked(true);
-      setHasAudioConsent(true);
-      return;
-    }
-    
-  const autoEnableNotifications = async () => {
-    console.log('[AutoEnable] First user interaction detected, enabling notifications...');
-    
-    // Enable audio and resume context
-    try {
-      await audioManager.unlock();
-      setAudioUnlocked(true);
-      setHasAudioConsent(true);
-      console.log('[AutoEnable] Audio enabled and context resumed');
-      
-      // Play a short silent buffer to confirm unlock
-      audioManager.playIfUnlocked('status-update');
-    } catch (e) {
-      console.warn('[AutoEnable] Audio enable failed:', e);
-    }
-    
-    // Force push notification permission prompt (if not already granted)
-    if ("Notification" in window && "serviceWorker" in navigator && orderId) {
-      try {
-        let permission = Notification.permission;
-        if (permission !== "granted") {
-          permission = await Notification.requestPermission();
-        }
-        
-        if (permission === "granted") {
-          console.log('[AutoEnable] Push permission granted, subscribing...');
-          subscribeToPushSilent();
-        }
-      } catch (e) {
-        console.warn('[AutoEnable] Push enable failed:', e);
-      }
-    }
-  };
-    
-    const handleFirstInteraction = () => {
-      autoEnableNotifications();
-      // Remove listeners after first interaction
-      document.removeEventListener('touchstart', handleFirstInteraction);
-      document.removeEventListener('click', handleFirstInteraction);
-      document.removeEventListener('pointerdown', handleFirstInteraction);
-      document.removeEventListener('mousedown', handleFirstInteraction);
-      document.removeEventListener('keydown', handleFirstInteraction);
-    };
-    
-    // Add listeners for any user interaction
-    document.addEventListener('touchstart', handleFirstInteraction, { once: true, passive: true });
-    document.addEventListener('click', handleFirstInteraction, { once: true });
-    document.addEventListener('pointerdown', handleFirstInteraction, { once: true });
-    document.addEventListener('mousedown', handleFirstInteraction, { once: true });
-    document.addEventListener('keydown', handleFirstInteraction, { once: true });
-    
-    return () => {
-      document.removeEventListener('touchstart', handleFirstInteraction);
-      document.removeEventListener('click', handleFirstInteraction);
-      document.removeEventListener('pointerdown', handleFirstInteraction);
-      document.removeEventListener('mousedown', handleFirstInteraction);
-      document.removeEventListener('keydown', handleFirstInteraction);
-    };
-  }, [orderId]);
-  
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
-  const [dataEvicted, setDataEvicted] = useState(false);
-  
-  useEffect(() => {
-    if (!orderId) return;
-    
-    const loadCachedData = async () => {
-      try {
-        const evicted = await offlineStorage.checkEviction();
-        setDataEvicted(evicted);
-        
-        if (!evicted) {
-          const cached = await offlineStorage.getOrder(orderId);
-          if (cached) {
-            console.log('[Offline] Loaded cached order:', cached.id);
-            setCachedOrder(cached);
-          }
-        }
-      } catch (e) {
-        console.warn('[Offline] Failed to load cached data:', e);
+  const [customerMessage, setCustomerMessage] = useState("");
+
+  const playBuzzer = useCallback(() => {
+    try {
+      const ctx = audioManager.getContext();
+      if (!ctx) {
+        console.warn('[Audio] No context available for buzzer');
+        return;
       }
-    };
-    
-    loadCachedData();
-  }, [orderId]);
-  
-  const { data: order, isLoading, error } = useQuery<Order>({
-    queryKey: ["/api/orders", orderId],
-    enabled: !!orderId,
-    refetchInterval: 4000,
-    initialData: cachedOrder || undefined
-  });
-  
-  useEffect(() => {
-    if (order && orderId) {
-      offlineStorage.saveOrder(order).catch(e => {
-        console.warn('[Offline] Failed to save order:', e);
-      });
-    }
-  }, [order, orderId]);
-  
-  const handleAudioUnlock = useCallback(() => {
-    setAudioUnlocked(true);
-    setHasAudioConsent(true);
-    console.log('[Audio] Audio unlock callback, syncing state');
-    
-    if (queuedNotificationsRef.current.length > 0) {
-      console.log(`[Audio] Playing ${queuedNotificationsRef.current.length} queued notifications`);
-      queuedNotificationsRef.current.forEach((notification, index) => {
-        setTimeout(() => {
-          const cue = notification.type === 'order_ready' ? 'order-ready' : 
-                      notification.type === 'message' ? 'message' :
-                      notification.type === 'offer' ? 'offer' : 'status-update';
-          audioManager.playIfUnlocked(cue);
-        }, index * 500);
-      });
-      queuedNotificationsRef.current = [];
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      // Spec: 800 Hz square wave for 800 ms at gain level 0.3
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + 0.8);
+      console.log('[Audio] Synthetic 800Hz buzzer played');
+    } catch (e) {
+      console.warn('[Audio] Synthetic buzzer failed:', e);
     }
   }, []);
-  
+
   const subscribeToPushSilent = async () => {
     if (!orderId) return;
-    
     try {
-      console.log('[Push] Starting silent push subscription...');
-      
       const vapidResponse = await fetch("/api/vapid-public-key");
       const { publicKey } = await vapidResponse.json();
-      
       const registration = await navigator.serviceWorker.ready;
-      
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey)
       });
-      
       await apiRequest("POST", `/api/orders/${orderId}/subscribe`, {
         subscription: subscription.toJSON()
       });
-      
-      console.log('[Push] Silent subscription saved');
       setPushEnabled(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     } catch (error) {
       console.error('[Push] Silent subscription failed:', error);
     }
   };
-  
-  const playSound = useCallback((type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
-    console.log(`[Audio] Playing sound for: ${type}, isUnlocked: ${audioManager.isUnlocked}, isVisible: ${isPageVisibleRef.current}`);
-    
-    // Always try to resume context if it's suspended (essential for iOS)
-    audioManager.unlock().catch(() => {});
-    
-    if (!isPageVisibleRef.current) {
-      queuedNotificationsRef.current.push({ type, timestamp: Date.now() });
-      console.log('[Audio] Page hidden, queued notification for later playback');
-      return;
-    }
-    
-    if (!audioManager.isUnlocked) {
-      queuedNotificationsRef.current.push({ type, timestamp: Date.now() });
-      console.log('[Audio] Audio not unlocked, queued notification');
-      return;
-    }
-    
-    const cue = type === 'order_ready' ? 'order-ready' : 
-                type === 'message' ? 'message' :
-                type === 'offer' ? 'offer' : 'status-update';
-    
-    audioManager.playIfUnlocked(cue);
-  }, []);
-  
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const wasHidden = !isPageVisibleRef.current;
-      isPageVisibleRef.current = document.visibilityState === 'visible';
-      
-      if (isPageVisibleRef.current && wasHidden && audioManager.isUnlocked) {
-        if (queuedNotificationsRef.current.length > 0) {
-          console.log(`[Audio] Page became visible, playing ${queuedNotificationsRef.current.length} queued sounds`);
-          queuedNotificationsRef.current.forEach((notification, index) => {
-            setTimeout(() => {
-              const cue = notification.type === 'order_ready' ? 'order-ready' : 
-                          notification.type === 'message' ? 'message' :
-                          notification.type === 'offer' ? 'offer' : 'status-update';
-              audioManager.playIfUnlocked(cue);
-            }, index * 300);
-          });
-          queuedNotificationsRef.current = [];
-        }
+
+  const autoEnableNotifications = useCallback(async () => {
+    console.log('[AutoEnable] Initializing notifications and audio context...');
+    try {
+      const success = await audioManager.unlock();
+      if (success) {
+        setAudioUnlocked(true);
+        // Play tone immediately to confirm audio path is open
+        playBuzzer();
       }
-    };
+    } catch (e) {
+      console.warn('[AutoEnable] Audio unlock failed:', e);
+    }
     
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    if ("Notification" in window && "serviceWorker" in navigator && orderId) {
+      try {
+        let permission = Notification.permission;
+        if (permission !== "granted") {
+          permission = await Notification.requestPermission();
+        }
+        if (permission === "granted") {
+          subscribeToPushSilent();
+        }
+      } catch (e) {
+        console.warn('[AutoEnable] Push permission failed:', e);
+      }
+    }
+  }, [orderId, playBuzzer]);
+
+  // Global interaction listener to ensure AudioContext is warmed up even if they don't click the specific button
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      autoEnableNotifications();
+      ['touchstart', 'click', 'pointerdown', 'mousedown', 'keydown'].forEach(evt => {
+        document.removeEventListener(evt, handleFirstInteraction);
+      });
+    };
+    ['touchstart', 'click', 'pointerdown', 'mousedown', 'keydown'].forEach(evt => {
+      document.addEventListener(evt, handleFirstInteraction, { once: true, passive: true });
+    });
+    return () => {
+      ['touchstart', 'click', 'pointerdown', 'mousedown', 'keydown'].forEach(evt => {
+        document.removeEventListener(evt, handleFirstInteraction);
+      });
+    };
+  }, [autoEnableNotifications]);
+
+  useEffect(() => {
+    const unsubscribe = audioManager.onUnlockChange(setAudioUnlocked);
+    return unsubscribe;
   }, []);
-  
+
+  useEffect(() => {
+    if (!orderId) return;
+    offlineStorage.getOrder(orderId).then(cached => {
+      if (cached) setCachedOrder(cached);
+    });
+  }, [orderId]);
+
+  const { data: order, isLoading } = useQuery<Order>({
+    queryKey: ["/api/orders", orderId],
+    enabled: !!orderId,
+    refetchInterval: 4000,
+    initialData: cachedOrder || undefined
+  });
+
+  useEffect(() => {
+    if (order && orderId) {
+      offlineStorage.saveOrder(order).catch(console.warn);
+    }
+  }, [order, orderId]);
+
   // Listen for Service Worker messages (triggered by push notifications)
   useEffect(() => {
     if (!navigator.serviceWorker) return;
-    
     const handleSwMessage = (event: MessageEvent) => {
       console.log('[SW Message] Received:', event.data);
       if (event.data?.type === 'ORDER_READY') {
-        console.log('[SW Message] ORDER_READY - playing buzzer');
-        playSound('order_ready');
+        console.log('[SW Message] ORDER_READY - playing synthetic buzzer');
+        playBuzzer();
         queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       }
     };
-    
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
-    
-    return () => {
-      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-    };
-  }, [orderId]);
-  
-  useEffect(() => {
-    if (order && order.messages.length > lastMessageCountRef.current) {
-      if (lastMessageCountRef.current > 0) {
-        setHasNewMessage(true);
-        const newestMessage = order.messages[order.messages.length - 1];
-        if (newestMessage) {
-          setNewMessageId(newestMessage.id);
-        }
-      }
-      lastMessageCountRef.current = order.messages.length;
-    }
-  }, [order?.messages.length]);
-  
-  useEffect(() => {
-    if (!hasNewMessage || !messagesCardRef.current) return;
-    
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setTimeout(() => {
-            setHasNewMessage(false);
-          }, 2000);
-        }
-      },
-      { threshold: 0.5 }
-    );
-    
-    observer.observe(messagesCardRef.current);
-    return () => observer.disconnect();
-  }, [hasNewMessage]);
-  
+    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+  }, [orderId, playBuzzer]);
+
   const registerMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/orders/${orderId}/register`);
-    },
+    mutationFn: async () => apiRequest("POST", `/api/orders/${orderId}/register`),
     onSuccess: () => {
       setHasRegistered(true);
-      audioManager.playIfUnlocked('message');
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     }
   });
-  
+
   const serviceRequestMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", `/api/orders/${orderId}/service`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-    }
+    mutationFn: async () => apiRequest("POST", `/api/orders/${orderId}/service`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] })
   });
-  
-  const [customerMessage, setCustomerMessage] = useState("");
+
   const customerMessageMutation = useMutation({
     mutationFn: async () => {
       if (!customerMessage.trim()) return;
@@ -540,334 +383,111 @@ export default function CustomerPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     }
   });
-  
-  const handleRequestService = () => {
-    serviceRequestMutation.mutate();
-  };
-  
-  const handleSendMessage = () => {
-    customerMessageMutation.mutate();
-  };
-  
+
   useEffect(() => {
     if (order && order.status === "waiting" && !hasRegistered && !registerMutation.isPending) {
       registerMutation.mutate();
     }
-  }, [order, hasRegistered]);
-  
+  }, [order, hasRegistered, registerMutation]);
+
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(console.error);
     }
   }, []);
-  
-  useEffect(() => {
-    if (!orderId) return;
-    
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const clientId = localStorage.getItem(`ws_client_${orderId}_clientId`) || undefined;
-    const lastTimestamp = localStorage.getItem(`ws_client_${orderId}_timestamp`) || '0';
-    
-    const params = new URLSearchParams({
-      id: orderId,
-      ...(clientId && { clientId }),
-      lastTimestamp
-    });
-    const wsUrl = `${protocol}//${window.location.host}/ws/orders?${params}`;
-    
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout | null = null;
-    let reconnectAttempts = 0;
-    const MAX_RECONNECT_ATTEMPTS = 10;
-    const INITIAL_BACKOFF = 1000;
-    const MAX_BACKOFF = 30000;
-    
-    const connect = () => {
-      try {
-        ws = new WebSocket(wsUrl);
-        
-        ws.onopen = () => {
-          console.log("[WS] Connected to order updates");
-          reconnectAttempts = 0;
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log("[WS] Received:", message);
-            
-            if (message.type === "ping") {
-              ws?.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
-              return;
-            }
-            
-            if (message.type === "connected" && message.clientId) {
-              localStorage.setItem(`ws_client_${orderId}_clientId`, message.clientId);
-              if (message.serverTimestamp) {
-                localStorage.setItem(`ws_client_${orderId}_timestamp`, message.serverTimestamp.toString());
-              }
-              return;
-            }
-            
-            if (message.type === "sync_response" && message.order) {
-              queryClient.setQueryData(["/api/orders", orderId], message.order);
-              if (message.serverTimestamp) {
-                localStorage.setItem(`ws_client_${orderId}_timestamp`, message.serverTimestamp.toString());
-              }
-              return;
-            }
-            
-            if (message.type === "order_updated") {
-              if (message.serverTimestamp) {
-                localStorage.setItem(`ws_client_${orderId}_timestamp`, message.serverTimestamp.toString());
-              }
-              const eventType = message.eventType as 'order_ready' | 'message' | 'offer' | 'status_update';
-              if (eventType) {
-                console.log(`[WS] Playing sound for event: ${eventType}`);
-                playSound(eventType);
-                
-                if (navigator.vibrate && eventType === 'order_ready') {
-                  navigator.vibrate([200, 100, 200, 100, 200]);
-                }
-              }
-              queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-            }
-          } catch (e) {
-            console.warn("[WS] Failed to parse message:", e);
-          }
-        };
-        
-        ws.onclose = () => {
-          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
-            reconnectAttempts++;
-            console.log(`[WS] Reconnecting in ${backoff}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-            reconnectTimeout = setTimeout(connect, backoff);
-          } else {
-            console.log("[WS] Max reconnect attempts reached");
-          }
-        };
-        
-        ws.onerror = () => {
-          console.error("[WS] WebSocket error");
-          ws?.close();
-        };
-      } catch (error) {
-        console.error("[WS] Failed to connect:", error);
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
-          reconnectAttempts++;
-          reconnectTimeout = setTimeout(connect, backoff);
-        }
-      }
-    };
-    
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log("[WS] Page became visible, checking connection");
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          reconnectAttempts = 0;
-          connect();
-        } else {
-          ws.send(JSON.stringify({
-            type: 'sync_request',
-            lastTimestamp: parseInt(localStorage.getItem(`ws_client_${orderId}_timestamp`) || '0', 10)
-          }));
-        }
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    connect();
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) ws.close();
-    };
-  }, [orderId, playSound]);
-  
-  if (isLoading) {
-    return <LoadingState />;
-  }
-  
-  if (error || !order) {
-    return <OrderNotFound />;
-  }
-  
+
+  if (isLoading && !order) return <LoadingState />;
+  if (!order) return <OrderNotFound />;
+
+  const isSetupComplete = pushEnabled && audioUnlocked;
+
   return (
-    <>
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="max-w-md w-full space-y-6">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="max-w-md w-full space-y-6">
         <div className="text-center space-y-2 relative">
           <div className="flex items-center justify-center gap-2">
-            <Badge variant="outline" className="font-mono text-sm px-3 py-1" data-testid="badge-order-id">
-              Order #{order.id}
+            <Badge variant="outline" className="font-mono text-sm px-3 py-1">
+              Order #{order.id.slice(0, 8).toUpperCase()}
             </Badge>
-            {hasNewMessage && (
-              <div 
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium animate-pulse-glow"
-                data-testid="indicator-new-message"
-              >
-                <Bell className="h-3 w-3" />
-                <span>New</span>
-              </div>
-            )}
           </div>
-          <h1 className="text-2xl font-bold">Your Order Status</h1>
-          <p className="text-muted-foreground">
-            {formatTime(order.createdAt)} • Track your order here
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">Digital Buzzer</h1>
+          <p className="text-muted-foreground">You will be notified via sound and push when your order is ready.</p>
         </div>
-        
-        <SubscribedCard order={order} onRequestService={handleRequestService} isRequestingService={serviceRequestMutation.isPending} />
-        
-        {order.messages.length > 0 && (
-          <Card ref={messagesCardRef}>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Send className="h-4 w-4" />
-                Messages ({order.messages.length})
-                {hasNewMessage && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {[...order.messages].reverse().map((msg, index) => (
-                  <div 
-                    key={msg.id} 
-                    className={`border-l-2 pl-3 py-2 transition-all duration-500 ${
-                      msg.id === newMessageId && hasNewMessage 
-                        ? "border-primary bg-primary/5 animate-fade-in-highlight" 
-                        : "border-primary/50"
-                    }`}
-                    data-testid={`message-item-${msg.id}`}
-                  >
-                    <p className="text-sm text-foreground">{msg.text}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formatTime(msg.sentAt)}
-                      {index === 0 && <span className="ml-2 text-primary font-medium">Latest</span>}
-                    </p>
-                  </div>
-                ))}
+
+        {!isSetupComplete && (
+          <Card className="border-primary/50 bg-primary/5">
+            <CardContent className="pt-6 text-center space-y-4">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 mb-2">
+                <Bell className="h-6 w-6 text-primary" />
               </div>
+              <div className="space-y-1">
+                <h3 className="font-semibold">Setup Notifications</h3>
+                <p className="text-sm text-muted-foreground">Tap below to ensure you receive sound and push alerts.</p>
+              </div>
+              <Button 
+                onClick={autoEnableNotifications}
+                className="w-full"
+                size="lg"
+              >
+                Enable Notifications
+              </Button>
             </CardContent>
           </Card>
         )}
 
-        {order.offers.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Gift className="h-4 w-4" />
-                Special Offers ({order.offers.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {order.offers.map((offer) => (
-                  <div key={offer.id} className="border-l-2 border-amber-500 pl-3 py-2" data-testid={`offer-item-${offer.id}`}>
-                    <p className="font-medium text-sm text-foreground">{offer.title}</p>
-                    <p className="text-sm text-muted-foreground mt-1">{offer.description}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{formatTime(offer.createdAt)}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <SubscribedCard 
+          order={order} 
+          onRequestService={() => serviceRequestMutation.mutate()} 
+          isRequestingService={serviceRequestMutation.isPending} 
+        />
 
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
-              Send Message to Staff
+              Message Staff
             </CardTitle>
           </CardHeader>
-            <CardContent className="space-y-3">
-              <Input
-                type="text"
-                placeholder="Ask staff something..."
-                value={customerMessage}
-                onChange={(e) => setCustomerMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && customerMessage.trim() && !customerMessageMutation.isPending) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                disabled={customerMessageMutation.isPending}
-                data-testid="input-customer-message"
-                maxLength={200}
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!customerMessage.trim() || customerMessageMutation.isPending}
-                className="w-full"
-                data-testid="button-send-message"
-              >
-                {customerMessageMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Send to Staff
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        
-        <div className={`flex items-center justify-center gap-2 text-xs flex-wrap ${!audioUnlocked ? 'text-amber-600' : 'text-muted-foreground'}`}>
-          {!audioUnlocked ? (
-            <button 
-              onClick={async () => {
-                const success = await audioManager.unlock();
-                if (success) {
-                  setAudioUnlocked(true);
-                  setHasAudioConsent(true);
+          <CardContent className="space-y-3">
+            <Input
+              type="text"
+              placeholder="Type your message..."
+              value={customerMessage}
+              onChange={(e) => setCustomerMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && customerMessage.trim() && !customerMessageMutation.isPending) {
+                  customerMessageMutation.mutate();
                 }
               }}
-              className="flex items-center gap-1 underline hover:no-underline"
-              data-testid="button-reactivate-audio"
+              disabled={customerMessageMutation.isPending}
+              maxLength={200}
+            />
+            <Button
+              onClick={() => customerMessageMutation.mutate()}
+              disabled={!customerMessage.trim() || customerMessageMutation.isPending}
+              className="w-full"
             >
-              <VolumeX className="h-3 w-3" />
-              <span className="font-medium">Tap to enable sound alerts</span>
-            </button>
-          ) : (
-            <>
-              <Volume2 className="h-3 w-3 text-green-600" />
-              <span className="text-green-600">Sound alerts active</span>
-            </>
-          )}
-          {pushEnabled ? (
-            <>
-              <span>•</span>
-              <Bell className="h-3 w-3 text-green-600" />
-              <span className="text-green-600">Push enabled</span>
-            </>
-          ) : (
-            <>
-              <span>•</span>
-              <Bell className="h-3 w-3" />
-              <span className="text-muted-foreground">Push disabled</span>
-            </>
-          )}
-        </div>
-        
-        <p className="text-center text-xs text-muted-foreground px-4">
-          Keep this page open to receive alerts when your order is ready
-        </p>
+              {customerMessageMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Send to Staff
+            </Button>
+          </CardContent>
+        </Card>
+
+        <div className="flex items-center justify-center gap-4 text-xs">
+          <div className="flex items-center gap-1">
+            {audioUnlocked ? <Volume2 className="h-3 w-3 text-green-600" /> : <VolumeX className="h-3 w-3 text-amber-600" />}
+            <span className={audioUnlocked ? "text-green-600" : "text-amber-600"}>
+              {audioUnlocked ? "Audio Ready" : "Audio Suspended"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Bell className={`h-3 w-3 ${pushEnabled ? "text-green-600" : "text-muted-foreground"}`} />
+            <span className={pushEnabled ? "text-green-600" : "text-muted-foreground"}>
+              {pushEnabled ? "Push Enabled" : "Push Inactive"}
+            </span>
+          </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
