@@ -6,7 +6,6 @@ import { audioManager } from "@/lib/audio-manager";
 import { detectCapabilities } from "@/lib/device-capabilities";
 import { offlineStorage } from "@/lib/indexed-db-storage";
 import { useToast } from "@/hooks/use-toast";
-import { AudioUnlockOverlay } from "@/components/audio-unlock-overlay";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -245,6 +244,65 @@ export default function CustomerPage() {
     return unsubscribe;
   }, []);
   
+  // Auto-enable audio and push notifications on first user interaction (tap anywhere)
+  useEffect(() => {
+    // Skip if already unlocked
+    if (audioManager.isUnlocked) {
+      setAudioUnlocked(true);
+      setHasAudioConsent(true);
+      return;
+    }
+    
+    const autoEnableNotifications = async () => {
+      console.log('[AutoEnable] First user interaction detected, enabling notifications...');
+      
+      // Enable audio
+      try {
+        const audioSuccess = await audioManager.unlock();
+        if (audioSuccess) {
+          setAudioUnlocked(true);
+          setHasAudioConsent(true);
+          console.log('[AutoEnable] Audio enabled successfully');
+        }
+      } catch (e) {
+        console.warn('[AutoEnable] Audio enable failed:', e);
+      }
+      
+      // Enable push notifications (if supported)
+      if ("Notification" in window && "serviceWorker" in navigator && orderId) {
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission === "granted") {
+            console.log('[AutoEnable] Push permission granted, subscribing...');
+            // Subscribe to push in background
+            subscribeToPushSilent();
+          }
+        } catch (e) {
+          console.warn('[AutoEnable] Push enable failed:', e);
+        }
+      }
+    };
+    
+    const handleFirstInteraction = () => {
+      autoEnableNotifications();
+      // Remove listeners after first interaction
+      document.removeEventListener('touchstart', handleFirstInteraction);
+      document.removeEventListener('click', handleFirstInteraction);
+      document.removeEventListener('pointerdown', handleFirstInteraction);
+    };
+    
+    // Add listeners for any user interaction
+    document.addEventListener('touchstart', handleFirstInteraction, { once: true, passive: true });
+    document.addEventListener('click', handleFirstInteraction, { once: true });
+    document.addEventListener('pointerdown', handleFirstInteraction, { once: true });
+    
+    return () => {
+      document.removeEventListener('touchstart', handleFirstInteraction);
+      document.removeEventListener('click', handleFirstInteraction);
+      document.removeEventListener('pointerdown', handleFirstInteraction);
+    };
+  }, [orderId]);
+  
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
   const [dataEvicted, setDataEvicted] = useState(false);
   
@@ -305,48 +363,31 @@ export default function CustomerPage() {
     }
   }, []);
   
-  const subscribeToPush = async () => {
+  const subscribeToPushSilent = async () => {
     if (!orderId) return;
     
     try {
-      console.log('[Push] Starting push subscription...');
-      
-      if (!("Notification" in window)) {
-        console.log('[Push] Notifications not supported');
-        return;
-      }
-      
-      const permission = await Notification.requestPermission();
-      console.log('[Push] Permission:', permission);
-      
-      if (permission !== "granted") {
-        console.log('[Push] Permission denied');
-        return;
-      }
+      console.log('[Push] Starting silent push subscription...');
       
       const vapidResponse = await fetch("/api/vapid-public-key");
       const { publicKey } = await vapidResponse.json();
-      console.log('[Push] Got VAPID key');
       
       const registration = await navigator.serviceWorker.ready;
-      console.log('[Push] Service worker ready');
       
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey)
       });
       
-      console.log('[Push] Got subscription:', subscription.endpoint);
-      
       await apiRequest("POST", `/api/orders/${orderId}/subscribe`, {
         subscription: subscription.toJSON()
       });
       
-      console.log('[Push] Subscription saved');
+      console.log('[Push] Silent subscription saved');
       setPushEnabled(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     } catch (error) {
-      console.error('[Push] Subscription failed:', error);
+      console.error('[Push] Silent subscription failed:', error);
     }
   };
   
@@ -638,7 +679,6 @@ export default function CustomerPage() {
   
   return (
     <>
-      {!audioUnlocked && !hasAudioConsent && <AudioUnlockOverlay onUnlock={handleAudioUnlock} />}
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="max-w-md w-full space-y-6">
         <div className="text-center space-y-2 relative">
@@ -724,14 +764,13 @@ export default function CustomerPage() {
           </Card>
         )}
 
-        {(hasAudioConsent || audioUnlocked || pushEnabled) && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                Send Message to Staff
-              </CardTitle>
-            </CardHeader>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Send Message to Staff
+            </CardTitle>
+          </CardHeader>
             <CardContent className="space-y-3">
               <Input
                 type="text"
@@ -768,7 +807,6 @@ export default function CustomerPage() {
               </Button>
             </CardContent>
           </Card>
-        )}
         
         <div className={`flex items-center justify-center gap-2 text-xs flex-wrap ${!audioUnlocked ? 'text-amber-600' : 'text-muted-foreground'}`}>
           {!audioUnlocked ? (
