@@ -229,7 +229,12 @@ export default function CustomerPage() {
     }
     return false;
   });
-  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return Notification.permission === 'granted';
+    }
+    return false;
+  });
   const lastMessageCountRef = useRef<number>(0);
   const messagesCardRef = useRef<HTMLDivElement>(null);
   const hasInitializedRef = useRef(false);
@@ -253,35 +258,39 @@ export default function CustomerPage() {
       return;
     }
     
-    const autoEnableNotifications = async () => {
-      console.log('[AutoEnable] First user interaction detected, enabling notifications...');
+  const autoEnableNotifications = async () => {
+    console.log('[AutoEnable] First user interaction detected, enabling notifications...');
+    
+    // Enable audio and resume context
+    try {
+      await audioManager.unlock();
+      setAudioUnlocked(true);
+      setHasAudioConsent(true);
+      console.log('[AutoEnable] Audio enabled and context resumed');
       
-      // Enable audio
+      // Play a short silent buffer to confirm unlock
+      audioManager.playIfUnlocked('status-update');
+    } catch (e) {
+      console.warn('[AutoEnable] Audio enable failed:', e);
+    }
+    
+    // Force push notification permission prompt (if not already granted)
+    if ("Notification" in window && "serviceWorker" in navigator && orderId) {
       try {
-        const audioSuccess = await audioManager.unlock();
-        if (audioSuccess) {
-          setAudioUnlocked(true);
-          setHasAudioConsent(true);
-          console.log('[AutoEnable] Audio enabled successfully');
+        let permission = Notification.permission;
+        if (permission !== "granted") {
+          permission = await Notification.requestPermission();
+        }
+        
+        if (permission === "granted") {
+          console.log('[AutoEnable] Push permission granted, subscribing...');
+          subscribeToPushSilent();
         }
       } catch (e) {
-        console.warn('[AutoEnable] Audio enable failed:', e);
+        console.warn('[AutoEnable] Push enable failed:', e);
       }
-      
-      // Enable push notifications (if supported)
-      if ("Notification" in window && "serviceWorker" in navigator && orderId) {
-        try {
-          const permission = await Notification.requestPermission();
-          if (permission === "granted") {
-            console.log('[AutoEnable] Push permission granted, subscribing...');
-            // Subscribe to push in background
-            subscribeToPushSilent();
-          }
-        } catch (e) {
-          console.warn('[AutoEnable] Push enable failed:', e);
-        }
-      }
-    };
+    }
+  };
     
     const handleFirstInteraction = () => {
       autoEnableNotifications();
@@ -289,17 +298,23 @@ export default function CustomerPage() {
       document.removeEventListener('touchstart', handleFirstInteraction);
       document.removeEventListener('click', handleFirstInteraction);
       document.removeEventListener('pointerdown', handleFirstInteraction);
+      document.removeEventListener('mousedown', handleFirstInteraction);
+      document.removeEventListener('keydown', handleFirstInteraction);
     };
     
     // Add listeners for any user interaction
     document.addEventListener('touchstart', handleFirstInteraction, { once: true, passive: true });
     document.addEventListener('click', handleFirstInteraction, { once: true });
     document.addEventListener('pointerdown', handleFirstInteraction, { once: true });
+    document.addEventListener('mousedown', handleFirstInteraction, { once: true });
+    document.addEventListener('keydown', handleFirstInteraction, { once: true });
     
     return () => {
       document.removeEventListener('touchstart', handleFirstInteraction);
       document.removeEventListener('click', handleFirstInteraction);
       document.removeEventListener('pointerdown', handleFirstInteraction);
+      document.removeEventListener('mousedown', handleFirstInteraction);
+      document.removeEventListener('keydown', handleFirstInteraction);
     };
   }, [orderId]);
   
@@ -393,6 +408,9 @@ export default function CustomerPage() {
   
   const playSound = useCallback((type: 'order_ready' | 'message' | 'offer' | 'status_update') => {
     console.log(`[Audio] Playing sound for: ${type}, isUnlocked: ${audioManager.isUnlocked}, isVisible: ${isPageVisibleRef.current}`);
+    
+    // Always try to resume context if it's suspended (essential for iOS)
+    audioManager.unlock().catch(() => {});
     
     if (!isPageVisibleRef.current) {
       queuedNotificationsRef.current.push({ type, timestamp: Date.now() });
