@@ -24,7 +24,7 @@ import {
   Volume2,
   VolumeX,
   MessageSquare,
-  Smartphone
+  Gift
 } from "lucide-react";
 
 type QueuedNotification = {
@@ -220,33 +220,24 @@ export default function CustomerPage() {
     return false;
   });
   const lastMessageCountRef = useRef<number>(0);
+  const messagesCardRef = useRef<HTMLDivElement>(null);
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
   const [customerMessage, setCustomerMessage] = useState("");
 
   const playBuzzer = useCallback(() => {
     try {
       const ctx = audioManager.getContext();
-      if (!ctx) {
-        console.warn('[Audio] No context available for buzzer');
-        return;
-      }
-      
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
-      // Spec: 800 Hz square wave for 800 ms at gain level 0.3
       osc.type = 'square';
       osc.frequency.setValueAtTime(800, ctx.currentTime);
-      
       gain.gain.setValueAtTime(0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-      
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
       osc.start();
       osc.stop(ctx.currentTime + 0.8);
-      console.log('[Audio] Synthetic 800Hz buzzer played');
     } catch (e) {
       console.warn('[Audio] Synthetic buzzer failed:', e);
     }
@@ -273,12 +264,10 @@ export default function CustomerPage() {
   };
 
   const autoEnableNotifications = useCallback(async () => {
-    console.log('[AutoEnable] Initializing notifications and audio context...');
     try {
       const success = await audioManager.unlock();
       if (success) {
         setAudioUnlocked(true);
-        // Play tone immediately to confirm audio path is open
         playBuzzer();
       }
     } catch (e) {
@@ -300,7 +289,6 @@ export default function CustomerPage() {
     }
   }, [orderId, playBuzzer]);
 
-  // Global interaction listener to ensure AudioContext is warmed up even if they don't click the specific button
   useEffect(() => {
     const handleFirstInteraction = () => {
       autoEnableNotifications();
@@ -340,16 +328,26 @@ export default function CustomerPage() {
   useEffect(() => {
     if (order && orderId) {
       offlineStorage.saveOrder(order).catch(console.warn);
+      
+      // Auto-scroll messages
+      if (order.messages.length > lastMessageCountRef.current) {
+        setTimeout(() => {
+          messagesCardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        }, 100);
+        
+        // Play notification if more messages arrived while visible
+        if (lastMessageCountRef.current > 0 && audioManager.isUnlocked) {
+          audioManager.play('message');
+        }
+      }
+      lastMessageCountRef.current = order.messages.length;
     }
   }, [order, orderId]);
 
-  // Listen for Service Worker messages (triggered by push notifications)
   useEffect(() => {
     if (!navigator.serviceWorker) return;
     const handleSwMessage = (event: MessageEvent) => {
-      console.log('[SW Message] Received:', event.data);
       if (event.data?.type === 'ORDER_READY') {
-        console.log('[SW Message] ORDER_READY - playing synthetic buzzer');
         playBuzzer();
         queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       }
@@ -368,7 +366,10 @@ export default function CustomerPage() {
 
   const serviceRequestMutation = useMutation({
     mutationFn: async () => apiRequest("POST", `/api/orders/${orderId}/service`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] })
+    onSuccess: () => {
+      toast({ title: "Service Requested", description: "Staff has been notified." });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+    }
   });
 
   const customerMessageMutation = useMutation({
@@ -380,6 +381,7 @@ export default function CustomerPage() {
     },
     onSuccess: () => {
       setCustomerMessage("");
+      toast({ title: "Message Sent", description: "Staff received your message." });
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
     }
   });
@@ -402,8 +404,8 @@ export default function CustomerPage() {
   const isSetupComplete = pushEnabled && audioUnlocked;
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-6">
+    <div className="min-h-screen bg-background flex flex-col items-center p-4">
+      <div className="max-w-md w-full space-y-6 pb-20">
         <div className="text-center space-y-2 relative">
           <div className="flex items-center justify-center gap-2">
             <Badge variant="outline" className="font-mono text-sm px-3 py-1">
@@ -411,7 +413,7 @@ export default function CustomerPage() {
             </Badge>
           </div>
           <h1 className="text-3xl font-bold tracking-tight">Digital Buzzer</h1>
-          <p className="text-muted-foreground">You will be notified via sound and push when your order is ready.</p>
+          <p className="text-muted-foreground">You'll be notified when your order is ready.</p>
         </div>
 
         {!isSetupComplete && (
@@ -424,11 +426,7 @@ export default function CustomerPage() {
                 <h3 className="font-semibold">Setup Notifications</h3>
                 <p className="text-sm text-muted-foreground">Tap below to ensure you receive sound and push alerts.</p>
               </div>
-              <Button 
-                onClick={autoEnableNotifications}
-                className="w-full"
-                size="lg"
-              >
+              <Button onClick={autoEnableNotifications} className="w-full" size="lg">
                 Enable Notifications
               </Button>
             </CardContent>
@@ -441,39 +439,81 @@ export default function CustomerPage() {
           isRequestingService={serviceRequestMutation.isPending} 
         />
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              Message Staff
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Input
-              type="text"
-              placeholder="Type your message..."
-              value={customerMessage}
-              onChange={(e) => setCustomerMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && customerMessage.trim() && !customerMessageMutation.isPending) {
-                  customerMessageMutation.mutate();
-                }
-              }}
-              disabled={customerMessageMutation.isPending}
-              maxLength={200}
-            />
-            <Button
-              onClick={() => customerMessageMutation.mutate()}
-              disabled={!customerMessage.trim() || customerMessageMutation.isPending}
-              className="w-full"
-            >
-              {customerMessageMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-              Send to Staff
-            </Button>
-          </CardContent>
-        </Card>
+        {order.offers.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Gift className="h-5 w-5 text-primary" />
+              Special Offers
+            </h3>
+            <div className="grid gap-3">
+              {order.offers.map((offer) => (
+                <Card key={offer.id} className="border-primary/20 bg-primary/5 overflow-hidden">
+                  <CardContent className="p-4 flex items-center gap-4">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Gift className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm">{offer.title}</p>
+                      <p className="text-xs text-muted-foreground">{offer.description}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
 
-        <div className="flex items-center justify-center gap-4 text-xs">
+        <div className="space-y-4" ref={messagesCardRef}>
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />
+            Order History & Messages
+          </h3>
+          
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="space-y-4">
+                {order.messages.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No messages from staff yet.</p>
+                ) : (
+                  order.messages.map((msg) => (
+                    <div key={msg.id} className="flex flex-col gap-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-medium text-primary">Staff</span>
+                        <span className="text-[10px] text-muted-foreground">{formatTime(msg.sentAt)}</span>
+                      </div>
+                      <div className="bg-muted rounded-lg p-3 text-sm">
+                        {msg.text}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="pt-4 border-t space-y-3">
+                <p className="text-xs font-medium text-muted-foreground">Reply to Staff</p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Type a message..."
+                    value={customerMessage}
+                    onChange={(e) => setCustomerMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && customerMessageMutation.mutate()}
+                    disabled={customerMessageMutation.isPending}
+                    className="flex-1"
+                  />
+                  <Button 
+                    size="icon" 
+                    onClick={() => customerMessageMutation.mutate()}
+                    disabled={!customerMessage.trim() || customerMessageMutation.isPending}
+                  >
+                    {customerMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="flex items-center justify-center gap-4 text-xs pt-4 border-t">
           <div className="flex items-center gap-1">
             {audioUnlocked ? <Volume2 className="h-3 w-3 text-green-600" /> : <VolumeX className="h-3 w-3 text-amber-600" />}
             <span className={audioUnlocked ? "text-green-600" : "text-amber-600"}>
