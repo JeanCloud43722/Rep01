@@ -1,8 +1,34 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useMemo, useRef, useEffect, useState } from "react";
+import { useMemo, useRef, useEffect, useState, Component, ReactNode } from "react";
 import * as THREE from "three";
+
+class CanvasErrorBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { hasError: boolean }> {
+        constructor(props: { children: ReactNode; fallback: ReactNode }) {
+                super(props);
+                this.state = { hasError: false };
+        }
+        static getDerivedStateFromError() {
+                return { hasError: true };
+        }
+        componentDidCatch(error: any, errorInfo: any) {
+                console.error("Canvas Error:", error, errorInfo);
+        }
+        render() {
+                if (this.state.hasError) return this.props.fallback;
+                return this.props.children;
+        }
+}
+
+function isWebGLAvailable() {
+        try {
+                const canvas = document.createElement("canvas");
+                return !!(window.WebGLRenderingContext && (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")));
+        } catch (e) {
+                return false;
+        }
+}
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { Button } from "@/components/ui/button";
@@ -191,7 +217,7 @@ const SyntheticHero = ({
                 { scope: sectionRef }
         );
 
-        const [webGlError, setWebGlError] = useState(false);
+        const [webGlError, setWebGlError] = useState(!isWebGLAvailable());
 
         return (
                 <section
@@ -200,19 +226,21 @@ const SyntheticHero = ({
                 >
                         <div className="absolute inset-0 z-0">
                                 {!webGlError ? (
-                                        <Canvas 
-                                                camera={{ position: [0, 0, 1] }}
-                                                onCreated={({ gl }) => {
-                                                        if (!gl.getContext()) setWebGlError(true);
-                                                }}
-                                                onError={() => setWebGlError(true)}
-                                        >
-                                                <ShaderPlane
-                                                        vertexShader={vertexShader}
-                                                        fragmentShader={fragmentShader}
-                                                        uniforms={shaderUniforms}
-                                                />
-                                        </Canvas>
+                                        <CanvasErrorBoundary fallback={<div className="absolute inset-0 bg-gradient-to-br from-[#00abec]/40 to-slate-900" />}>
+                                                <Canvas 
+                                                        camera={{ position: [0, 0, 1] }}
+                                                        onCreated={({ gl }) => {
+                                                                if (!gl.getContext()) setWebGlError(true);
+                                                        }}
+                                                        onError={() => setWebGlError(true)}
+                                                >
+                                                        <ShaderPlane
+                                                                vertexShader={vertexShader}
+                                                                fragmentShader={fragmentShader}
+                                                                uniforms={shaderUniforms}
+                                                        />
+                                                </Canvas>
+                                        </CanvasErrorBoundary>
                                 ) : (
                                         <div className="absolute inset-0 bg-gradient-to-br from-[#00abec]/40 to-slate-900" />
                                 )}
