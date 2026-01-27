@@ -16,25 +16,8 @@ import { FileText, Volume2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Plus, 
-  Bell, 
-  Clock, 
-  QrCode, 
-  Copy, 
-  Check, 
-  Trash2, 
-  Send, 
-  Calendar,
-  RefreshCw,
-  Users,
-  CheckCircle2,
-  AlertCircle,
-  Gift,
-  Wrench,
-  Edit,
-  MessageSquare
-} from "lucide-react";
+import { Plus, Bell, Clock, QrCode, Copy, Check, Trash2, Send, Calendar, RefreshCw, Users, CheckCircle2, AlertCircle, Gift, Wrench, Edit, MessageSquare, Loader2 } from "lucide-react";
+import SyntheticHero from "@/components/synthetic-hero";
 import QRCode from "qrcode";
 
 function getStatusBadgeVariant(status: Order["status"]): "default" | "secondary" | "destructive" | "outline" {
@@ -1061,60 +1044,59 @@ export default function AdminPage() {
   
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between gap-4 px-4 mx-auto max-w-6xl">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Bell className="h-5 w-5" />
+      <SyntheticHero 
+        title="Restaurant Staff Dashboard"
+        description="Manage your orders, send notifications, and provide exceptional service with real-time tracking and instant alerts."
+        badgeText="Admin Console"
+        badgeLabel="Control"
+        ctaButtons={[
+          { 
+            text: "Create New Order", 
+            primary: true, 
+            onClick: () => createOrderMutation.mutate() 
+          }
+        ]}
+      />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 -mt-12 relative z-20">
+        <Tabs defaultValue="active" className="w-full">
+          <div className="flex items-center justify-between mb-8 bg-card p-2 rounded-xl border shadow-sm">
+            <TabsList>
+              <TabsTrigger value="active" className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Active Orders
+                {activeOrders.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-5 min-w-5 flex items-center justify-center p-0 text-[10px]">
+                    {activeOrders.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="completed" className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" />
+                History
+              </TabsTrigger>
+            </TabsList>
+            
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-muted/50 rounded-full border text-xs font-medium">
+                <Volume2 className="h-3.5 w-3.5 text-primary" />
+                {audioEnabled ? "Sound On" : "Tap to enable sound"}
+              </div>
+              <Button 
+                onClick={handleCreateOrder}
+                disabled={createOrderMutation.isPending}
+                className="hover-elevate active-elevate-2"
+                data-testid="button-create-order"
+              >
+                {createOrderMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-2" />
+                )}
+                New Order
+              </Button>
             </div>
-            <h1 className="text-xl font-semibold">Restaurant Buzzer</h1>
           </div>
-          
-          <div className="flex items-center gap-2">
-            <Badge variant={audioEnabled ? "secondary" : "outline"} className="text-xs">
-              <Volume2 className="h-3 w-3 mr-1" />
-              {audioEnabled ? "Sound On" : "Tap to enable sound"}
-            </Badge>
-            <Button 
-              variant="outline" 
-              size="icon" 
-              onClick={() => refetch()}
-              data-testid="button-refresh"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-            <Button 
-              onClick={handleCreateOrder}
-              disabled={createOrderMutation.isPending}
-              data-testid="button-create-order"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              New Order
-            </Button>
-          </div>
-        </div>
-      </header>
-      
-      <main className="container px-4 py-8 mx-auto max-w-6xl">
-        <Tabs defaultValue="active" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="active" data-testid="tab-active-orders">
-              Active Orders
-              {activeOrders.length > 0 && (
-                <Badge variant="secondary" className="ml-2">
-                  {activeOrders.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="completed" data-testid="tab-completed-orders">
-              Completed
-              {completedOrders.length > 0 && (
-                <Badge variant="secondary" className="ml-2">
-                  {completedOrders.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-          </TabsList>
           
           <TabsContent value="active" className="space-y-6">
             {isLoading ? (
