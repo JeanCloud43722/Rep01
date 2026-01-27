@@ -24,7 +24,13 @@ const ShaderPlane = ({
         uniforms,
 }: ShaderPlaneProps) => {
         const meshRef = useRef<THREE.Mesh>(null);
-        const { size } = useThree();
+        const { size, gl } = useThree();
+
+        useEffect(() => {
+                if (!gl.getContext()) {
+                        console.error("WebGL Context could not be created.");
+                }
+        }, [gl]);
 
         useFrame((state) => {
                 if (meshRef.current) {
@@ -185,19 +191,31 @@ const SyntheticHero = ({
                 { scope: sectionRef }
         );
 
+        const [webGlError, setWebGlError] = useState(false);
+
         return (
                 <section
                         ref={sectionRef}
-                        className="relative flex items-center justify-center min-h-[70vh] overflow-hidden rounded-3xl mx-4 my-8"
+                        className="relative flex items-center justify-center min-h-[70vh] overflow-hidden rounded-3xl mx-4 my-8 bg-slate-900"
                 >
                         <div className="absolute inset-0 z-0">
-                                <Canvas camera={{ position: [0, 0, 1] }}>
-                                        <ShaderPlane
-                                                vertexShader={vertexShader}
-                                                fragmentShader={fragmentShader}
-                                                uniforms={shaderUniforms}
-                                        />
-                                </Canvas>
+                                {!webGlError ? (
+                                        <Canvas 
+                                                camera={{ position: [0, 0, 1] }}
+                                                onCreated={({ gl }) => {
+                                                        if (!gl.getContext()) setWebGlError(true);
+                                                }}
+                                                onError={() => setWebGlError(true)}
+                                        >
+                                                <ShaderPlane
+                                                        vertexShader={vertexShader}
+                                                        fragmentShader={fragmentShader}
+                                                        uniforms={shaderUniforms}
+                                                />
+                                        </Canvas>
+                                ) : (
+                                        <div className="absolute inset-0 bg-gradient-to-br from-[#00abec]/40 to-slate-900" />
+                                )}
                         </div>
 
                         {/* Dark wash for readability as per design guidelines */}

@@ -209,8 +209,24 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws/orders" });
-  const adminWss = new WebSocketServer({ server: httpServer, path: "/ws/admin" });
+  const wss = new WebSocketServer({ noServer: true });
+  const adminWss = new WebSocketServer({ noServer: true });
+  
+  httpServer.on("upgrade", (request, socket, head) => {
+    const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
+
+    if (pathname === "/ws/orders") {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
+      });
+    } else if (pathname === "/ws/admin") {
+      adminWss.handleUpgrade(request, socket, head, (ws) => {
+        adminWss.emit("connection", ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
   
   // Restore scheduled notifications on startup
   await restoreScheduledNotifications();
