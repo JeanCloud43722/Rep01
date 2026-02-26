@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Html5Qrcode } from "html5-qrcode";
+import { BrowserQRCodeReader, IScannerControls } from "@zxing/browser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Camera, Upload, X, AlertCircle, Loader2 } from "lucide-react";
@@ -10,130 +10,111 @@ interface QRScannerProps {
 }
 
 export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
-  const [mode, setMode] = useState<'camera' | 'upload' | 'error'>('camera');
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [isScanning, setIsScanning] = useState(false);
+  const [mode, setMode] = useState<"camera" | "upload">("camera");
+  const [errorMessage, setErrorMessage] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const readerRef = useRef<BrowserQRCodeReader | null>(null);
+
+  const stopCamera = () => {
+    if (controlsRef.current) {
+      try { controlsRef.current.stop(); } catch {}
+      controlsRef.current = null;
+    }
+  };
+
+  const startCamera = async () => {
+    if (!videoRef.current) return;
+    setErrorMessage("");
+    try {
+      if (!readerRef.current) readerRef.current = new BrowserQRCodeReader();
+      controlsRef.current = await readerRef.current.decodeFromVideoDevice(
+        undefined,
+        videoRef.current,
+        (result, err) => {
+          if (result) {
+            stopCamera();
+            onScanSuccess(result.getText());
+          }
+          if (err && !(err.message?.includes("No MultiFormat"))) {
+            // suppress continuous "no QR found" noise
+          }
+        }
+      );
+    } catch (err: any) {
+      stopCamera();
+      if (err?.name === "NotAllowedError" || err?.message?.includes("Permission")) {
+        setErrorMessage("Camera access denied. Please use photo upload instead.");
+      } else if (err?.name === "NotFoundError") {
+        setErrorMessage("No camera found. Please use photo upload instead.");
+      } else {
+        setErrorMessage("Camera not available. Please use photo upload instead.");
+      }
+      setMode("upload");
+    }
+  };
 
   useEffect(() => {
-    startCameraScanning();
-    
-    return () => {
-      stopScanning();
-    };
+    startCamera();
+    return () => stopCamera();
   }, []);
 
-  const startCameraScanning = async () => {
-    try {
-      setIsScanning(true);
-      setErrorMessage('');
-      
-      if (!scannerRef.current) {
-        scannerRef.current = new Html5Qrcode("qr-reader");
-      }
-
-      await scannerRef.current.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0
-        },
-        (decodedText) => {
-          stopScanning();
-          onScanSuccess(decodedText);
-        },
-        () => {}
-      );
-      
-      setMode('camera');
-    } catch (err: any) {
-      console.error("[QR Scanner] Camera error:", err);
-      setIsScanning(false);
-      
-      if (err?.name === 'NotAllowedError' || err?.message?.includes('Permission')) {
-        setErrorMessage('Camera access denied. Please use photo upload instead.');
-      } else if (err?.name === 'NotFoundError') {
-        setErrorMessage('No camera found. Please use photo upload instead.');
-      } else {
-        setErrorMessage('Camera not available. Please use photo upload instead.');
-      }
-      
-      setMode('upload');
-    }
+  const handleSwitchToUpload = () => {
+    stopCamera();
+    setMode("upload");
   };
 
-  const stopScanning = async () => {
-    if (scannerRef.current) {
-      try {
-        const state = scannerRef.current.getState();
-        if (state === 2) {
-          await scannerRef.current.stop();
-        }
-      } catch (err) {
-        console.warn("[QR Scanner] Stop error:", err);
-      }
-    }
-    setIsScanning(false);
+  const handleSwitchToCamera = () => {
+    setMode("camera");
+    setTimeout(startCamera, 100);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-
     setIsProcessing(true);
-    setErrorMessage('');
-
+    setErrorMessage("");
     try {
-      if (!scannerRef.current) {
-        scannerRef.current = new Html5Qrcode("qr-reader-hidden");
-      }
-
-      const result = await scannerRef.current.scanFile(file, true);
-      onScanSuccess(result);
-    } catch (err) {
-      console.error("[QR Scanner] File scan error:", err);
-      setErrorMessage('Could not read QR code from image. Please try a clearer photo.');
+      const url = URL.createObjectURL(file);
+      if (!readerRef.current) readerRef.current = new BrowserQRCodeReader();
+      const result = await readerRef.current.decodeFromImageUrl(url);
+      URL.revokeObjectURL(url);
+      onScanSuccess(result.getText());
+    } catch {
+      setErrorMessage("Could not read QR code from image. Please try a clearer photo.");
     } finally {
       setIsProcessing(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  };
-
-  const switchToUpload = () => {
-    stopScanning();
-    setMode('upload');
-  };
-
-  const switchToCamera = () => {
-    setMode('camera');
-    startCameraScanning();
   };
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
           <CardTitle className="text-lg">Scan QR Code</CardTitle>
           <Button variant="ghost" size="icon" onClick={onClose} data-testid="button-close-scanner">
             <X className="h-4 w-4" />
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          {mode === 'camera' && (
+          {mode === "camera" && (
             <>
-              <div 
-                id="qr-reader" 
-                className="w-full aspect-square rounded-lg overflow-hidden bg-muted"
-              />
+              <div className="w-full aspect-square rounded-lg overflow-hidden bg-muted relative">
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover"
+                  muted
+                  playsInline
+                  autoPlay
+                />
+              </div>
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={switchToUpload}
+                onClick={handleSwitchToUpload}
                 data-testid="button-switch-to-upload"
               >
                 <Upload className="h-4 w-4 mr-2" />
@@ -142,7 +123,7 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
             </>
           )}
 
-          {mode === 'upload' && (
+          {mode === "upload" && (
             <>
               <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-lg bg-muted/50">
                 {isProcessing ? (
@@ -156,10 +137,7 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
                     <p className="text-sm text-muted-foreground text-center mb-4">
                       Upload a photo of the QR code from your gallery
                     </p>
-                    <Button
-                      onClick={() => fileInputRef.current?.click()}
-                      data-testid="button-upload-qr"
-                    >
+                    <Button onClick={() => fileInputRef.current?.click()} data-testid="button-upload-qr">
                       <Upload className="h-4 w-4 mr-2" />
                       Choose Photo
                     </Button>
@@ -174,11 +152,10 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
                   </>
                 )}
               </div>
-              
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={switchToCamera}
+                onClick={handleSwitchToCamera}
                 data-testid="button-switch-to-camera"
               >
                 <Camera className="h-4 w-4 mr-2" />
@@ -193,8 +170,6 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
               <p>{errorMessage}</p>
             </div>
           )}
-
-          <div id="qr-reader-hidden" className="hidden" />
         </CardContent>
       </Card>
     </div>
