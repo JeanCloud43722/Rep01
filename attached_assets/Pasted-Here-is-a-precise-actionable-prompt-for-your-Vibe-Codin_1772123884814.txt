@@ -1,0 +1,58 @@
+Here is a precise, actionable **prompt for your Vibe Coding Assistant** to fix **Android-specific push notification issues** in your Flask-based Bistro Buzzer system:
+
+---
+
+### 📱 Prompt: Fix Android Push Notification Delivery
+
+> The system works on desktop browsers but **fails to deliver Web Push notifications on Android devices** (Chrome, Samsung Internet).  
+>
+> **Root Cause**:  
+> - Placeholder VAPID keys are being used → Android strictly rejects invalid keys with silent failure  
+> - No proper `vapid_claims` email configured → causes 401 Unauthorized in production-like environments  
+> - Service Worker may not be caching correctly on first load over cellular networks  
+>
+> **Required Fixes**:  
+>
+> 1. **Enforce Real VAPID Keys in Development**:  
+>    - In `app.py`, if placeholder keys are detected, **log a clear warning**:  
+>      ```python
+>      if VAPID_PUBLIC_KEY.startswith("BCgVp"):
+>          print("⚠️ WARNING: Using demo VAPID keys. Push will FAIL on Android/iOS. Generate real keys with: pip install py-vapid && vapid --gen")
+>      ```
+>
+> 2. **Fix VAPID Claims**:  
+>    - Ensure `vapid_claims={"sub": "mailto:admin@bistro.example"}` uses a **valid email format** (not `your-email@example.com`)  
+>
+> 3. **Add Android-Specific Debug Logging**:  
+>    - In `customer.html`, after subscription, log the endpoint origin:  
+>      ```js
+>      console.log("Push endpoint host:", subscription.endpoint.split('/')[2]);
+>      ```
+>    - This helps confirm if Android is using `fcm.googleapis.com` (expected)
+>
+> 4. **Cache Service Worker Aggressively**:  
+>    - In `sw.js`, add explicit caching for offline resilience:  
+>      ```js
+>      const CACHE_NAME = 'buzzer-v1';
+>      self.addEventListener('install', (e) => {
+>        e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(['/static/sw.js'])));
+>      });
+>      ```
+>
+> **Validation**:  
+> - On Android Chrome:  
+>   1. Open `/order/abc123`  
+>   2. Tap “Enable Notifications” → allow permission  
+>   3. From admin, trigger “Sofort Buzzer”  
+>   4. **Device must show system-level push notification within 5 seconds**  
+>
+> **Deliverables**:  
+> - Updated `app.py` with VAPID warning + valid email  
+> - Updated `sw.js` with caching  
+> - Updated `customer.html` with debug log  
+>
+> **Note**: Do **not** change core logic — only harden Android compatibility.
+
+---
+
+This prompt directly addresses why Android fails while desktop works, and gives the AI exact code-level instructions to resolve it — without breaking your minimal, no-build architecture.

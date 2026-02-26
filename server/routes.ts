@@ -34,9 +34,13 @@ function getVapidKeys() {
     const generated = webPush.generateVAPIDKeys();
     publicKey = generated.publicKey;
     privateKey = generated.privateKey;
-    console.log("Generated new VAPID keys. For production, set these as environment variables:");
-    console.log(`VAPID_PUBLIC_KEY=${publicKey}`);
-    console.log(`VAPID_PRIVATE_KEY=${privateKey}`);
+    console.warn("[VAPID] WARNING: Using ephemeral VAPID keys generated at startup.");
+    console.warn("[VAPID] Push notifications WILL FAIL on Android/iOS after server restart.");
+    console.warn("[VAPID] Set persistent keys as environment variables:");
+    console.warn(`[VAPID] VAPID_PUBLIC_KEY=${publicKey}`);
+    console.warn(`[VAPID] VAPID_PRIVATE_KEY=${privateKey}`);
+  } else {
+    console.log("[VAPID] Using persistent VAPID keys from environment variables.");
   }
   
   return { publicKey, privateKey };
@@ -44,8 +48,9 @@ function getVapidKeys() {
 
 const vapidKeys = getVapidKeys();
 
+// VAPID email must be a valid RFC 5322 address — Android FCM strictly validates this
 webPush.setVapidDetails(
-  "mailto:admin@restaurant-buzzer.local",
+  "mailto:admin@bistro-buzzer.app",
   vapidKeys.publicKey,
   vapidKeys.privateKey
 );

@@ -307,6 +307,13 @@ export default function CustomerPage() {
       const { publicKey } = await fetch("/api/vapid-public-key").then((r) => r.json());
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+      // Android debug: log the push service host (should be fcm.googleapis.com on Android)
+      const subJson = sub.toJSON() as { endpoint?: string };
+      if (subJson.endpoint) {
+        const pushHost = subJson.endpoint.split("/")[2];
+        console.log("[Push] Subscribed via:", pushHost);
+        console.log("[Push] Endpoint origin:", pushHost?.includes("fcm.googleapis") ? "Android FCM" : pushHost?.includes("push.apple") ? "Apple APNs" : "Other/Desktop");
+      }
       await apiRequest("POST", `/api/orders/${orderId}/subscribe`, { subscription: sub.toJSON() });
       setPushEnabled(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
