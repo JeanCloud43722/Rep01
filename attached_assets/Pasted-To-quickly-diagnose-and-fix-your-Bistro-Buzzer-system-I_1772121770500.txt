@@ -1,0 +1,35 @@
+To quickly diagnose and fix your **Bistro Buzzer** system, I need answers to these **5 targeted questions**. Your responses will pinpoint whether the issue is in setup, browser behavior, VAPID, networking, or logic:
+
+---
+
+### 🔍 Critical Debugging Questions
+
+1. **When you open `http://localhost:5000/admin` and click “Neue Bestellung erstellen”, do you see a valid customer URL like `http://localhost:5000/order/a1b2c3d4` and a working QR code?**  
+   → If **no**: The Flask route `/create-order` or template rendering is broken.  
+   → If **yes**: Proceed to Q2.
+
+2. **When you open that customer URL in a new tab (or scan it with your phone on the same Wi-Fi), does the page load and show the “Benachrichtigungen aktivieren” button?**  
+   → If **no**: Your network or Flask host binding (`0.0.0.0`) is misconfigured.  
+   → If **yes**: Proceed to Q3.
+
+3. **When you click “Benachrichtigungen aktivieren”, does your browser show a permission prompt for notifications?**  
+   → If **no prompt appears**: The Service Worker failed to register (check browser console for errors).  
+   → If **prompt appears but fails**: VAPID keys are invalid or missing (even placeholders must be syntactically valid Base64URL).
+
+4. **After enabling notifications, when you click “Sofort Buzzer” in the admin panel, do you see any error in the **terminal where `python app.py` is running**?**  
+   → Common error: `WebPushException: Push failed: Unauthorized (401)` → VAPID private key mismatch.  
+   → No error? Check browser DevTools > Application > Service Workers for SW crashes.
+
+5. **Are you testing on `localhost` (same device) or across devices (e.g., laptop + phone)?**  
+   → If **across devices**: `localhost` won’t work — you need `ngrok` and `BASE_URL` set (as discussed earlier).  
+   → If **same device**: Skip networking issues.
+
+---
+
+### 🛠️ What I’ll Do With Your Answers:
+- If Q1/Q2 fail → Fix Flask routing or host config  
+- If Q3 fails → Repair Service Worker registration or VAPID placeholder format  
+- If Q4 shows 401 → Provide valid demo VAPID keys  
+- If Q5 is cross-device → Guide you through `ngrok` setup  
+
+**Reply with just the numbers and your answers (e.g., “1. yes, 2. yes, 3. no prompt, 4. no error, 5. same device”)** — I’ll give you the exact fix in <60 seconds.
