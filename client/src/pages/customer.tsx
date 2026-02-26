@@ -1,11 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
-import { detectCapabilities } from "@/lib/device-capabilities";
 import { offlineStorage } from "@/lib/indexed-db-storage";
-import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,13 +22,7 @@ import {
   Volume2,
   VolumeX,
   MessageSquare,
-  Smartphone
 } from "lucide-react";
-
-type QueuedNotification = {
-  type: 'order_ready' | 'message' | 'offer' | 'status_update';
-  timestamp: number;
-};
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -208,7 +200,6 @@ function LoadingState() {
 }
 
 export default function CustomerPage() {
-  const { toast } = useToast();
   const params = useParams<{ id: string }>();
   const orderId = params.id;
   const [hasRegistered, setHasRegistered] = useState(false);
@@ -219,7 +210,6 @@ export default function CustomerPage() {
     }
     return false;
   });
-  const lastMessageCountRef = useRef<number>(0);
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
   const [customerMessage, setCustomerMessage] = useState("");
 
