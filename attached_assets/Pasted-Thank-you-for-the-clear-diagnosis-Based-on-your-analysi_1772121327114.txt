@@ -1,0 +1,137 @@
+Thank you for the clear diagnosis. Based on your analysis, **the core issue is not functional logic** but a **build/runtime instability in the Vite toolchain**, caused by stale or orphaned chunk references from a dependency (likely `html5-qrcode` or another dynamic import).
+
+Since your app is already feature-complete (Node.js + React + WebSocket + AudioManager + bidirectional messaging), **you do not need to rebuild it in Flask**. Instead, you need a **targeted recovery plan** to stabilize the Vite build and restore reliable runtime behavior.
+
+---
+
+### ✅ Recovery & Stabilization Plan (For Your Existing Node/React App)
+
+#### 🔧 Step 1: **Purge Vite’s Cache & Build Artifacts**
+These stale chunks live in Vite’s internal cache or `dist/`.
+
+```bash
+# Stop dev server
+npm run dev -- --stop  # or just Ctrl+C
+
+# Clear Vite cache (critical!)
+rm -rf node_modules/.vite
+rm -rf .vite
+
+# Clear dist if exists
+rm -rf dist
+
+# Reinstall problematic deps cleanly
+npm uninstall html5-qrcode
+npm install html5-qrcode@latest
+```
+
+> 💡 **Why?** Vite caches dynamic imports. If a dependency updates its internal chunk structure but the cache isn’t cleared, Vite serves broken references.
+
+---
+
+#### 🔧 Step 2: **Lock Down Dynamic Imports**
+In your QR scanner component (`src/components/QrScanner.tsx` or similar), **avoid lazy/dynamic imports** that trigger Vite’s code-splitting unpredictably:
+
+```tsx
+// ❌ BAD: Triggers dynamic chunking
+const Html5Qrcode = await import('html5-qrcode');
+
+// ✅ GOOD: Static import (forces bundling into main chunk)
+import { Html5Qrcode } from 'html5-qrcode';
+```
+
+If you must lazy-load for performance, use **explicit Vite preloading**:
+```ts
+// In main.tsx or customer.tsx
+import('html5-qrcode').then(() => {
+  // Safe to use now
+});
+```
+
+---
+
+#### 🔧 Step 3: **Disable Vite’s Auto-Optimize During Dev (Temporary)**
+Add to `vite.config.ts`:
+```ts
+export default defineConfig({
+  optimizeDeps: {
+    exclude: ['html5-qrcode'], // Prevent Vite from optimizing this dep
+  },
+  build: {
+    commonjsOptions: {
+      include: [/html5-qrcode/, /node_modules/], // Force CJS handling
+    }
+  }
+});
+```
+
+This prevents Vite from rewriting the dependency’s internal imports.
+
+---
+
+#### 🔧 Step 4: **Verify Bidirectional Messaging End-to-End**
+Once the app runs stably:
+
+1. Open **two browser tabs**:  
+   - Tab A: `http://localhost:5000/admin`  
+   - Tab B: `http://localhost:5000/order/abc123` (from QR)
+2. In Tab B: Click anywhere → confirm audio unlocks (check console for “Audio unlocked”)
+3. In Tab A: Send a message via “Message Customer”
+4. In Tab B: Confirm:
+   - Message appears in UI
+   - Audio chime plays (`message` sound)
+   - WebSocket log shows `message` event
+
+> 🛠️ **Debug Tip**: Add this to `customer.tsx`:
+> ```ts
+> useEffect(() => {
+>   const ws = new WebSocket(...);
+>   ws.onmessage = (e) => {
+>     console.log("WebSocket received:", e.data);
+>     // Trigger audio here
+>   };
+> }, []);
+> ```
+
+---
+
+#### 🔧 Step 5: **Add Runtime Health Check**
+To prevent silent crashes, add a startup validator in `main.tsx`:
+
+```tsx
+// At app root
+useEffect(() => {
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    alert("Your browser doesn't support audio alerts. Please use Chrome, Firefox, or Safari.");
+  }
+}, []);
+```
+
+And in backend (`server/index.ts`):
+```ts
+// On server start
+console.log("✅ Bistro Buzzer Server Ready");
+console.log("📡 WebSocket endpoint: ws://localhost:5000/ws");
+console.log("🌐 Admin UI: http://localhost:5000/admin");
+```
+
+---
+
+### 🚫 What NOT to Do
+- **Do not rewrite in Flask** — your React/Node stack already implements all features correctly.
+- **Do not ignore the chunk warnings** — they cause runtime crashes under load (as seen in Playwright).
+- **Do not keep dynamic imports for camera-heavy libs** — they break Vite’s caching.
+
+---
+
+### ✅ Final Validation Checklist
+After fixes:
+- [ ] `npm run dev` starts without chunk warnings  
+- [ ] QR scanner loads instantly (no 404 on chunks)  
+- [ ] Customer hears audio on first tap + staff message  
+- [ ] Playwright test passes 10 consecutive runs  
+- [ ] iOS Safari receives WebSocket messages + audio  
+
+You’re **one cache purge and import fix away** from a rock-solid buzzer system. The architecture is sound — just needs Vite hygiene.
+
+Would you like me to generate the exact `vite.config.ts` patch or a health-check script?

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'restaurant-buzzer-v1';
+const CACHE_NAME = 'restaurant-buzzer-v2';
 const STATIC_ASSETS = [
   '/',
   '/favicon.png',
