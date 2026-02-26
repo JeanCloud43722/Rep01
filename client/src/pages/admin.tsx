@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2 } from "lucide-react";
+import { FileText, Volume2, VolumeX } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -134,11 +134,18 @@ function OrderCard({
         {order.messages.length > 0 && (
           <div className="text-sm bg-muted/50 rounded-md px-3 py-2 space-y-2">
             <p className="font-medium text-xs text-muted-foreground">Messages ({order.messages.length})</p>
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {[...order.messages].reverse().slice(0, 3).map((msg) => (
-                <p key={msg.id} className="text-foreground text-xs break-words">
-                  <span className="text-muted-foreground">{formatTime(msg.sentAt)}</span>: {msg.text}
-                </p>
+            <div className="space-y-1.5 max-h-36 overflow-y-auto">
+              {[...order.messages].reverse().slice(0, 5).map((msg) => (
+                <div key={msg.id} className="flex items-start gap-1.5 text-xs">
+                  <Badge
+                    variant={msg.sender === "customer" ? "default" : "secondary"}
+                    className="text-[10px] px-1.5 py-0 shrink-0 mt-0.5"
+                  >
+                    {msg.sender === "customer" ? "Customer" : "You"}
+                  </Badge>
+                  <span className="text-foreground break-words flex-1">{msg.text}</span>
+                  <span className="text-muted-foreground shrink-0">{formatTime(msg.sentAt)}</span>
+                </div>
               ))}
             </div>
           </div>
@@ -742,19 +749,25 @@ export default function AdminPage() {
   const [notesOrderId, setNotesOrderId] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const audioEnabledRef = useRef(false);
+  const [isAdminMuted, setIsAdminMuted] = useState(() => localStorage.getItem("admin_muted") === "true");
+  const isAdminMutedRef = useRef(isAdminMuted);
+  useEffect(() => { isAdminMutedRef.current = isAdminMuted; }, [isAdminMuted]);
+  const toggleAdminMute = useCallback(() => {
+    setIsAdminMuted((prev) => {
+      const next = !prev;
+      localStorage.setItem("admin_muted", String(next));
+      isAdminMutedRef.current = next;
+      return next;
+    });
+  }, []);
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
     refetchInterval: 4000
   });
   
-  const playStaffSound = useCallback((type: 'service_request' | 'new_registration' | 'order_completed') => {
-    console.log(`[Admin Audio] Playing sound for: ${type}, audioEnabled: ${audioEnabledRef.current}`);
-    if (!audioEnabledRef.current) {
-      console.log('[Admin Audio] Sound not enabled yet');
-      return;
-    }
-    
+  const playStaffSound = useCallback((type: 'service_request' | 'new_registration' | 'order_completed' | 'message') => {
+    if (!audioEnabledRef.current || isAdminMutedRef.current) return;
     switch (type) {
       case 'service_request':
         audioManager.play('service-request');
@@ -764,6 +777,9 @@ export default function AdminPage() {
         break;
       case 'order_completed':
         audioManager.play('order-completed');
+        break;
+      case 'message':
+        audioManager.play('message');
         break;
     }
   }, []);
@@ -837,14 +853,10 @@ export default function AdminPage() {
             console.log("[Admin WS] Received:", message);
             
             if (message.type === "admin_update") {
-              const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed';
+              const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed' | 'message';
               if (eventType) {
-                console.log(`[Admin WS] Playing sound for event: ${eventType}`);
                 playStaffSound(eventType);
-                
-                if (navigator.vibrate) {
-                  navigator.vibrate([200, 100, 200]);
-                }
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
               }
               
               if (message.eventType === "service_request") {
@@ -857,6 +869,11 @@ export default function AdminPage() {
                 toast({
                   title: "New Customer",
                   description: `Order ${message.orderId} customer arrived`,
+                });
+              } else if (message.eventType === "message") {
+                toast({
+                  title: "Customer Message",
+                  description: `Order ${message.orderId.slice(0, 8).toUpperCase()} sent a message`,
                 });
               }
               
@@ -1075,6 +1092,16 @@ export default function AdminPage() {
               <Volume2 className="h-3 w-3 mr-1" />
               {audioEnabled ? "Sound On" : "Tap to enable sound"}
             </Badge>
+            <Button
+              variant={isAdminMuted ? "outline" : "ghost"}
+              size="icon"
+              onClick={toggleAdminMute}
+              aria-label={isAdminMuted ? "Unmute alerts" : "Mute alerts"}
+              title={isAdminMuted ? "Unmute alerts" : "Mute alerts"}
+              data-testid="button-admin-mute"
+            >
+              {isAdminMuted ? <VolumeX className="h-4 w-4 text-muted-foreground" /> : <Volume2 className="h-4 w-4 text-green-600" />}
+            </Button>
             <Button 
               variant="outline" 
               size="icon" 

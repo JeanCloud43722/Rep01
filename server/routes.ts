@@ -109,7 +109,7 @@ async function sendNotification(orderId: string, message?: string) {
 
   // Add message to order history
   const notificationText = message || "Your order is ready for pickup!";
-  await storage.addMessage(orderId, notificationText);
+  await storage.addMessage(orderId, notificationText, "staff");
   
   // Mark as notified
   await storage.markOrderNotified(orderId);
@@ -508,7 +508,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Order not found" });
       }
       
-      await storage.addMessage(req.params.id, message);
+      await storage.addMessage(req.params.id, message, "staff");
       
       // Always notify WebSocket subscribers (works on all devices including iOS)
       notifyOrderUpdate(req.params.id, "message");
@@ -554,9 +554,10 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Order not found" });
       }
       
-      await storage.addMessage(req.params.id, message);
+      await storage.addMessage(req.params.id, message, "customer");
       
-      // Notify admin via WebSocket
+      // Notify admin via WebSocket and also notify customer's own WebSocket for thread update
+      notifyOrderUpdate(req.params.id, "message");
       notifyAdminUpdate(req.params.id, "message");
       console.log(`[Message] Customer sent message to order ${req.params.id}: ${message}`);
       

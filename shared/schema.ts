@@ -23,7 +23,8 @@ export type PushSubscriptionData = z.infer<typeof pushSubscriptionSchema>;
 export const messageSchema = z.object({
   id: z.string(),
   text: z.string(),
-  sentAt: z.string()
+  sentAt: z.string(),
+  sender: z.enum(["staff", "customer"])
 });
 
 export type Message = z.infer<typeof messageSchema>;

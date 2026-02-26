@@ -14,7 +14,7 @@ export interface IStorage {
   updateOrderStatus(id: string, status: Order["status"]): Promise<Order | undefined>;
   updateOrderScheduledTime(id: string, scheduledTime: string): Promise<Order | undefined>;
   markOrderNotified(id: string): Promise<Order | undefined>;
-  addMessage(id: string, message: string): Promise<Order | undefined>;
+  addMessage(id: string, message: string, sender: "staff" | "customer"): Promise<Order | undefined>;
   addOffer(id: string, title: string, description: string): Promise<Order | undefined>;
   addServiceRequest(id: string): Promise<Order | undefined>;
   updateOrderNotes(id: string, notes: string): Promise<Order | undefined>;
@@ -98,14 +98,15 @@ export class MemStorage implements IStorage {
     return order;
   }
 
-  async addMessage(id: string, message: string): Promise<Order | undefined> {
+  async addMessage(id: string, message: string, sender: "staff" | "customer"): Promise<Order | undefined> {
     const order = this.orders.get(id);
     if (!order) return undefined;
     
     const msg: Message = {
       id: generateShortId(),
       text: message,
-      sentAt: new Date().toISOString()
+      sentAt: new Date().toISOString(),
+      sender
     };
     
     order.messages.push(msg);

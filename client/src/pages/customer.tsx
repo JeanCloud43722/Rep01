@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -10,10 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Check, 
-  Clock, 
-  Loader2, 
+import {
+  Check,
+  Clock,
+  Loader2,
   AlertCircle,
   CheckCircle2,
   Calendar,
@@ -24,131 +24,189 @@ import {
   MessageSquare,
 } from "lucide-react";
 
+// ─── helpers ────────────────────────────────────────────────────────────────
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
+  const out = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) out[i] = rawData.charCodeAt(i);
+  return out;
+}
+
+function formatTime(isoString: string) {
+  return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatRelativeTime(isoString: string): string {
+  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return formatTime(isoString);
+}
+
+function formatRemainingTime(scheduledTime: string): string {
+  const diff = new Date(scheduledTime).getTime() - Date.now();
+  if (diff <= 0) return "Should be ready now!";
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  return h > 0 ? `${h}h ${m}m ${s}s remaining` : `${m}m ${s}s remaining`;
 }
 
 function getStatusConfig(status: Order["status"]) {
   switch (status) {
     case "waiting":
     case "subscribed":
-      return {
-        icon: Clock,
-        title: "Order Registered",
-        description: "We're preparing your order. You'll be alerted when it's ready!",
-        color: "text-primary"
-      };
+      return { icon: Clock, title: "Order Registered", description: "We're preparing your order. You'll be alerted when it's ready!", color: "text-primary" };
     case "scheduled":
-      return {
-        icon: Calendar,
-        title: "Order In Progress",
-        description: "Your order is being prepared. You'll be alerted soon!",
-        color: "text-primary"
-      };
+      return { icon: Calendar, title: "Order In Progress", description: "Your order is being prepared. You'll be alerted soon!", color: "text-primary" };
     case "notified":
     case "completed":
-      return {
-        icon: CheckCircle2,
-        title: "Order Ready!",
-        description: "Your order is ready for pickup",
-        color: "text-green-600 dark:text-green-500"
-      };
+      return { icon: CheckCircle2, title: "Order Ready!", description: "Your order is ready for pickup", color: "text-green-600 dark:text-green-500" };
     default:
-      return {
-        icon: AlertCircle,
-        title: "Unknown Status",
-        description: "Please contact staff for assistance",
-        color: "text-muted-foreground"
-      };
+      return { icon: AlertCircle, title: "Unknown Status", description: "Please contact staff for assistance", color: "text-muted-foreground" };
   }
 }
 
-function formatTime(isoString: string) {
-  const date = new Date(isoString);
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+// ─── sub-components ─────────────────────────────────────────────────────────
 
-function formatRemainingTime(scheduledTime: string): string {
-  const now = new Date();
-  const scheduled = new Date(scheduledTime);
-  const diff = scheduled.getTime() - now.getTime();
-  
-  if (diff <= 0) {
-    return "Should be ready now!";
-  }
-  
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s remaining`;
-  }
-  return `${minutes}m ${seconds}s remaining`;
-}
+function StatusCard({ order, onRequestService, isRequestingService }: {
+  order: Order;
+  onRequestService: () => void;
+  isRequestingService: boolean;
+}) {
+  const config = getStatusConfig(order.status);
+  const StatusIcon = config.icon;
+  const [remaining, setRemaining] = useState("");
 
-function SubscribedCard({ order, onRequestService, isRequestingService }: { order: Order; onRequestService: () => void; isRequestingService: boolean }) {
-  const statusConfig = getStatusConfig(order.status);
-  const StatusIcon = statusConfig.icon;
-  const [remainingTime, setRemainingTime] = useState<string>("");
-  
   useEffect(() => {
     if (!order.scheduledTime || order.status !== "scheduled") return;
-    
-    const scheduledTime = order.scheduledTime;
-    setRemainingTime(formatRemainingTime(scheduledTime));
-    
-    const interval = setInterval(() => {
-      setRemainingTime(formatRemainingTime(scheduledTime));
-    }, 1000);
-    
-    return () => clearInterval(interval);
+    setRemaining(formatRemainingTime(order.scheduledTime));
+    const id = setInterval(() => setRemaining(formatRemainingTime(order.scheduledTime!)), 1000);
+    return () => clearInterval(id);
   }, [order.scheduledTime, order.status]);
-  
+
+  const isReady = order.status === "notified" || order.status === "completed";
+
   return (
     <Card>
       <CardContent className="pt-6">
-        <div className="flex flex-col items-center text-center space-y-6">
-          <div className={`w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center ${order.status === "notified" || order.status === "completed" ? "bg-green-100 dark:bg-green-900/30" : ""}`}>
-            <StatusIcon className={`h-10 w-10 ${statusConfig.color}`} />
+        <div className="flex flex-col items-center text-center space-y-5">
+          <div className={`w-20 h-20 rounded-full flex items-center justify-center ${isReady ? "bg-green-100 dark:bg-green-900/30" : "bg-primary/10"}`}>
+            <StatusIcon className={`h-10 w-10 ${config.color}`} />
           </div>
-          
-          <div className="space-y-2">
-            <h3 className="text-xl font-semibold">{statusConfig.title}</h3>
-            <p className="text-muted-foreground">{statusConfig.description}</p>
+          <div className="space-y-1">
+            <h3 className="text-xl font-semibold">{config.title}</h3>
+            <p className="text-muted-foreground text-sm">{config.description}</p>
           </div>
-          
           {order.scheduledTime && order.status === "scheduled" && (
-            <div className="flex flex-col items-center gap-2">
-              <div className="flex items-center gap-2 text-lg font-semibold text-primary bg-primary/10 rounded-lg px-4 py-3 w-full">
-                <Clock className="h-5 w-5" />
-                <span>{remainingTime}</span>
+            <div className="flex flex-col items-center gap-1 w-full">
+              <div className="flex items-center gap-2 text-base font-semibold text-primary bg-primary/10 rounded-lg px-4 py-2 w-full justify-center">
+                <Clock className="h-4 w-4" />
+                <span>{remaining}</span>
               </div>
               <p className="text-xs text-muted-foreground">Ready at {formatTime(order.scheduledTime)}</p>
             </div>
           )}
-          
           <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-500">
             <Check className="h-4 w-4" />
             <span>This page updates automatically</span>
           </div>
-          
-          <Button 
+          <Button
             variant="destructive"
             size="lg"
             onClick={onRequestService}
             disabled={isRequestingService}
-            className="mt-4 w-full max-w-xs"
+            className="w-full max-w-xs"
           >
             {isRequestingService ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <AlertCircle className="h-5 w-5 mr-2" />}
             {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MessageThread({ order, onSend, isSending }: {
+  order: Order;
+  onSend: (text: string) => void;
+  isSending: boolean;
+}) {
+  const [text, setText] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [order.messages.length]);
+
+  const handleSend = () => {
+    const trimmed = text.trim();
+    if (!trimmed || isSending) return;
+    onSend(trimmed);
+    setText("");
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <MessageSquare className="h-4 w-4" />
+          Chat with Staff
+          {order.messages.length > 0 && (
+            <Badge variant="secondary" className="ml-auto text-xs">
+              {order.messages.length}
+            </Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {order.messages.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">
+            No messages yet. Send a message to the staff below.
+          </p>
+        ) : (
+          <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+            {order.messages.map((msg) => {
+              const isCustomer = msg.sender === "customer";
+              return (
+                <div key={msg.id} className={`flex ${isCustomer ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                    isCustomer
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-foreground"
+                  }`}>
+                    <p className="break-words">{msg.text}</p>
+                    <p className={`text-xs mt-1 ${isCustomer ? "text-primary-foreground/70 text-right" : "text-muted-foreground"}`}>
+                      {isCustomer ? "You" : "Staff"} · {formatRelativeTime(msg.sentAt)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+        )}
+        <div className="flex gap-2 pt-1">
+          <Input
+            type="text"
+            placeholder="Type a message..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+            disabled={isSending}
+            maxLength={200}
+            className="flex-1"
+          />
+          <Button
+            size="icon"
+            onClick={handleSend}
+            disabled={!text.trim() || isSending}
+            aria-label="Send message"
+          >
+            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>
       </CardContent>
@@ -167,9 +225,7 @@ function OrderNotFound() {
             </div>
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">Order Not Found</h3>
-              <p className="text-sm text-muted-foreground">
-                This order link is invalid or has expired. Please contact the restaurant staff.
-              </p>
+              <p className="text-sm text-muted-foreground">This order link is invalid or has expired. Please contact the restaurant staff.</p>
             </div>
           </div>
         </CardContent>
@@ -182,16 +238,10 @@ function LoadingState() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="max-w-md w-full">
-        <CardHeader className="text-center">
-          <Skeleton className="h-8 w-32 mx-auto mb-2" />
-          <Skeleton className="h-4 w-48 mx-auto" />
-        </CardHeader>
-        <CardContent className="flex flex-col items-center space-y-6">
+        <CardContent className="pt-10 flex flex-col items-center space-y-6">
           <Skeleton className="w-20 h-20 rounded-full" />
-          <div className="space-y-2 w-full">
-            <Skeleton className="h-6 w-48 mx-auto" />
-            <Skeleton className="h-4 w-64 mx-auto" />
-          </div>
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-4 w-64" />
           <Skeleton className="h-12 w-full max-w-xs" />
         </CardContent>
       </Card>
@@ -199,179 +249,221 @@ function LoadingState() {
   );
 }
 
+// ─── main page ───────────────────────────────────────────────────────────────
+
 export default function CustomerPage() {
   const params = useParams<{ id: string }>();
   const orderId = params.id;
-  const [hasRegistered, setHasRegistered] = useState(false);
-  const [audioUnlocked, setAudioUnlocked] = useState(() => audioManager.isUnlocked);
-  const [pushEnabled, setPushEnabled] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return Notification.permission === 'granted';
-    }
-    return false;
-  });
-  const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
-  const [customerMessage, setCustomerMessage] = useState("");
 
+  // ── audio / push state ──
+  const [audioUnlocked, setAudioUnlocked] = useState(() => audioManager.isUnlocked);
+  const [isMuted, setIsMuted] = useState(() => localStorage.getItem("customer_muted") === "true");
+  const [pushEnabled, setPushEnabled] = useState(() => typeof window !== "undefined" && Notification.permission === "granted");
+
+  // ── order data ──
+  const [hasRegistered, setHasRegistered] = useState(false);
+  const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
+
+  // ── mute toggle (T006) ──
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      localStorage.setItem("customer_muted", String(next));
+      return next;
+    });
+  }, []);
+
+  // ── 800Hz buzzer (order ready) ──
   const playBuzzer = useCallback(() => {
+    if (isMuted) return;
     try {
       const ctx = audioManager.getContext();
-      if (!ctx) {
-        console.warn('[Audio] No context available for buzzer');
-        return;
-      }
-      
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
-      // Spec: 800 Hz square wave for 800 ms at gain level 0.3
-      osc.type = 'square';
+      osc.type = "square";
       osc.frequency.setValueAtTime(800, ctx.currentTime);
-      
       gain.gain.setValueAtTime(0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-      
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
       osc.start();
       osc.stop(ctx.currentTime + 0.8);
-      console.log('[Audio] Synthetic 800Hz buzzer played');
     } catch (e) {
-      console.warn('[Audio] Synthetic buzzer failed:', e);
+      console.warn("[Audio] Buzzer failed:", e);
     }
-  }, []);
+  }, [isMuted]);
 
-  const subscribeToPushSilent = async () => {
+  // ── message chime (staff message) ──
+  const playMessageChime = useCallback(() => {
+    if (isMuted) return;
+    audioManager.playIfUnlocked("message");
+  }, [isMuted]);
+
+  // ── push subscription ──
+  const subscribeToPushSilent = useCallback(async () => {
     if (!orderId) return;
     try {
-      const vapidResponse = await fetch("/api/vapid-public-key");
-      const { publicKey } = await vapidResponse.json();
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey)
-      });
-      await apiRequest("POST", `/api/orders/${orderId}/subscribe`, {
-        subscription: subscription.toJSON()
-      });
+      const { publicKey } = await fetch("/api/vapid-public-key").then((r) => r.json());
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+      await apiRequest("POST", `/api/orders/${orderId}/subscribe`, { subscription: sub.toJSON() });
       setPushEnabled(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-    } catch (error) {
-      console.error('[Push] Silent subscription failed:', error);
-    }
-  };
-
-  const autoEnableNotifications = useCallback(async () => {
-    console.log('[AutoEnable] Initializing notifications and audio context...');
-    try {
-      const success = await audioManager.unlock();
-      if (success) {
-        setAudioUnlocked(true);
-        // Play tone immediately to confirm audio path is open
-        playBuzzer();
-      }
     } catch (e) {
-      console.warn('[AutoEnable] Audio unlock failed:', e);
+      console.error("[Push] Subscription failed:", e);
     }
-    
-    if ("Notification" in window && "serviceWorker" in navigator && orderId) {
-      try {
-        let permission = Notification.permission;
-        if (permission !== "granted") {
-          permission = await Notification.requestPermission();
-        }
-        if (permission === "granted") {
-          subscribeToPushSilent();
-        }
-      } catch (e) {
-        console.warn('[AutoEnable] Push permission failed:', e);
-      }
-    }
-  }, [orderId, playBuzzer]);
-
-  // Global interaction listener to ensure AudioContext is warmed up even if they don't click the specific button
-  useEffect(() => {
-    const handleFirstInteraction = () => {
-      autoEnableNotifications();
-      ['touchstart', 'click', 'pointerdown', 'mousedown', 'keydown'].forEach(evt => {
-        document.removeEventListener(evt, handleFirstInteraction);
-      });
-    };
-    ['touchstart', 'click', 'pointerdown', 'mousedown', 'keydown'].forEach(evt => {
-      document.addEventListener(evt, handleFirstInteraction, { once: true, passive: true });
-    });
-    return () => {
-      ['touchstart', 'click', 'pointerdown', 'mousedown', 'keydown'].forEach(evt => {
-        document.removeEventListener(evt, handleFirstInteraction);
-      });
-    };
-  }, [autoEnableNotifications]);
-
-  useEffect(() => {
-    const unsubscribe = audioManager.onUnlockChange(setAudioUnlocked);
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    if (!orderId) return;
-    offlineStorage.getOrder(orderId).then(cached => {
-      if (cached) setCachedOrder(cached);
-    });
   }, [orderId]);
 
+  // ── auto-enable on first interaction ──
+  const autoEnable = useCallback(async () => {
+    try {
+      const ok = await audioManager.unlock();
+      if (ok) {
+        setAudioUnlocked(true);
+        if (!isMuted) playBuzzer();
+      }
+    } catch (e) {
+      console.warn("[AutoEnable] Audio:", e);
+    }
+    if ("Notification" in window && "serviceWorker" in navigator && orderId) {
+      try {
+        let perm = Notification.permission;
+        if (perm !== "granted") perm = await Notification.requestPermission();
+        if (perm === "granted") subscribeToPushSilent();
+      } catch (e) {
+        console.warn("[AutoEnable] Push:", e);
+      }
+    }
+  }, [orderId, isMuted, playBuzzer, subscribeToPushSilent]);
+
+  useEffect(() => {
+    const handle = () => {
+      autoEnable();
+      events.forEach((e) => document.removeEventListener(e, handle));
+    };
+    const events = ["touchstart", "click", "pointerdown", "mousedown", "keydown"];
+    events.forEach((e) => document.addEventListener(e, handle, { once: true, passive: true }));
+    return () => events.forEach((e) => document.removeEventListener(e, handle));
+  }, [autoEnable]);
+
+  useEffect(() => audioManager.onUnlockChange(setAudioUnlocked), []);
+
+  // ── offline cache ──
+  useEffect(() => {
+    if (!orderId) return;
+    offlineStorage.getOrder(orderId).then((c) => { if (c) setCachedOrder(c); });
+  }, [orderId]);
+
+  // ── query ──
   const { data: order, isLoading } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
     refetchInterval: 4000,
-    initialData: cachedOrder || undefined
+    initialData: cachedOrder || undefined,
   });
 
   useEffect(() => {
-    if (order && orderId) {
-      offlineStorage.saveOrder(order).catch(console.warn);
-    }
+    if (order && orderId) offlineStorage.saveOrder(order).catch(console.warn);
   }, [order, orderId]);
 
-  // Listen for Service Worker messages (triggered by push notifications)
+  // ── WebSocket (T002) ──
+  useEffect(() => {
+    if (!orderId) return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${protocol}//${window.location.host}/ws/orders?id=${orderId}`;
+    let ws: WebSocket | null = null;
+    let attempts = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const MAX = 10;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(url);
+        ws.onopen = () => { attempts = 0; console.log("[Customer WS] Connected"); };
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.type === "ping") { ws?.send(JSON.stringify({ type: "pong", timestamp: Date.now() })); return; }
+            if (msg.type === "order_updated") {
+              if (msg.eventType === "order_ready") {
+                playBuzzer();
+              } else if (msg.eventType === "message") {
+                playMessageChime();
+              }
+              queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (attempts < MAX) {
+            const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+            attempts++;
+            reconnectTimer = setTimeout(connect, delay);
+          }
+        };
+        ws.onerror = () => ws?.close();
+      } catch (e) {
+        if (attempts < MAX) {
+          const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+          attempts++;
+          reconnectTimer = setTimeout(connect, delay);
+        }
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && (!ws || ws.readyState !== WebSocket.OPEN)) {
+        attempts = 0;
+        connect();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    connect();
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [orderId, playBuzzer, playMessageChime]);
+
+  // ── Service Worker messages ──
   useEffect(() => {
     if (!navigator.serviceWorker) return;
-    const handleSwMessage = (event: MessageEvent) => {
-      console.log('[SW Message] Received:', event.data);
-      if (event.data?.type === 'ORDER_READY') {
-        console.log('[SW Message] ORDER_READY - playing synthetic buzzer');
+    const handle = (event: MessageEvent) => {
+      if (event.data?.type === "ORDER_READY") {
         playBuzzer();
         queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       }
     };
-    navigator.serviceWorker.addEventListener('message', handleSwMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    navigator.serviceWorker.addEventListener("message", handle);
+    return () => navigator.serviceWorker.removeEventListener("message", handle);
   }, [orderId, playBuzzer]);
 
+  // ── Service Worker registration ──
+  useEffect(() => {
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(console.error);
+  }, []);
+
+  // ── mutations ──
   const registerMutation = useMutation({
-    mutationFn: async () => apiRequest("POST", `/api/orders/${orderId}/register`),
+    mutationFn: () => apiRequest("POST", `/api/orders/${orderId}/register`),
     onSuccess: () => {
       setHasRegistered(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-    }
+    },
   });
 
   const serviceRequestMutation = useMutation({
-    mutationFn: async () => apiRequest("POST", `/api/orders/${orderId}/service`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] })
+    mutationFn: () => apiRequest("POST", `/api/orders/${orderId}/service`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] }),
   });
 
-  const customerMessageMutation = useMutation({
-    mutationFn: async () => {
-      if (!customerMessage.trim()) return;
-      return apiRequest("POST", `/api/orders/${orderId}/customer-message`, {
-        message: customerMessage.trim()
-      });
-    },
-    onSuccess: () => {
-      setCustomerMessage("");
-      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-    }
+  const sendMessageMutation = useMutation({
+    mutationFn: (text: string) => apiRequest("POST", `/api/orders/${orderId}/customer-message`, { message: text }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] }),
   });
 
   useEffect(() => {
@@ -380,12 +472,6 @@ export default function CustomerPage() {
     }
   }, [order, hasRegistered, registerMutation]);
 
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(console.error);
-    }
-  }, []);
-
   if (isLoading && !order) return <LoadingState />;
   if (!order) return <OrderNotFound />;
 
@@ -393,90 +479,81 @@ export default function CustomerPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-6">
-        <div className="text-center space-y-2 relative">
-          <div className="flex items-center justify-center gap-2">
-            <Badge variant="outline" className="font-mono text-sm px-3 py-1">
-              Order #{order.id.slice(0, 8).toUpperCase()}
-            </Badge>
-          </div>
+      <div className="max-w-md w-full space-y-4">
+
+        {/* Header */}
+        <div className="text-center space-y-1">
+          <Badge variant="outline" className="font-mono text-sm px-3 py-1">
+            Order #{order.id.slice(0, 8).toUpperCase()}
+          </Badge>
           <h1 className="text-3xl font-bold tracking-tight">Digital Buzzer</h1>
-          <p className="text-muted-foreground">You will be notified via sound and push when your order is ready.</p>
+          <p className="text-sm text-muted-foreground">We'll notify you the moment your order is ready.</p>
         </div>
 
+        {/* Notification setup prompt */}
         {!isSetupComplete && (
-          <Card className="border-primary/50 bg-primary/5">
-            <CardContent className="pt-6 text-center space-y-4">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 mb-2">
-                <Bell className="h-6 w-6 text-primary" />
+          <Card className="border-primary/40 bg-primary/5">
+            <CardContent className="pt-5 text-center space-y-3">
+              <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary/10">
+                <Bell className="h-5 w-5 text-primary" />
               </div>
               <div className="space-y-1">
-                <h3 className="font-semibold">Setup Notifications</h3>
-                <p className="text-sm text-muted-foreground">Tap below to ensure you receive sound and push alerts.</p>
+                <p className="font-semibold text-sm">Enable Notifications</p>
+                <p className="text-xs text-muted-foreground">Tap to activate sound and push alerts.</p>
               </div>
-              <Button 
-                onClick={autoEnableNotifications}
-                className="w-full"
-                size="lg"
-              >
+              <Button onClick={autoEnable} className="w-full" size="lg">
                 Enable Notifications
               </Button>
             </CardContent>
           </Card>
         )}
 
-        <SubscribedCard 
-          order={order} 
-          onRequestService={() => serviceRequestMutation.mutate()} 
-          isRequestingService={serviceRequestMutation.isPending} 
+        {/* Order status */}
+        <StatusCard
+          order={order}
+          onRequestService={() => serviceRequestMutation.mutate()}
+          isRequestingService={serviceRequestMutation.isPending}
         />
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              Message Staff
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Input
-              type="text"
-              placeholder="Type your message..."
-              value={customerMessage}
-              onChange={(e) => setCustomerMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && customerMessage.trim() && !customerMessageMutation.isPending) {
-                  customerMessageMutation.mutate();
-                }
-              }}
-              disabled={customerMessageMutation.isPending}
-              maxLength={200}
-            />
-            <Button
-              onClick={() => customerMessageMutation.mutate()}
-              disabled={!customerMessage.trim() || customerMessageMutation.isPending}
-              className="w-full"
-            >
-              {customerMessageMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-              Send to Staff
-            </Button>
-          </CardContent>
-        </Card>
+        {/* Message thread (T003) */}
+        <MessageThread
+          order={order}
+          onSend={(text) => sendMessageMutation.mutate(text)}
+          isSending={sendMessageMutation.isPending}
+        />
 
-        <div className="flex items-center justify-center gap-4 text-xs">
-          <div className="flex items-center gap-1">
-            {audioUnlocked ? <Volume2 className="h-3 w-3 text-green-600" /> : <VolumeX className="h-3 w-3 text-amber-600" />}
-            <span className={audioUnlocked ? "text-green-600" : "text-amber-600"}>
-              {audioUnlocked ? "Audio Ready" : "Audio Suspended"}
-            </span>
+        {/* Status bar with mute toggle (T006) */}
+        <div className="flex items-center justify-between px-1 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <Bell className={`h-3 w-3 ${pushEnabled ? "text-green-600" : "text-muted-foreground"}`} />
+              <span className={pushEnabled ? "text-green-600" : "text-muted-foreground"}>
+                {pushEnabled ? "Push On" : "Push Off"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              {audioUnlocked
+                ? <Volume2 className="h-3 w-3 text-green-600" />
+                : <VolumeX className="h-3 w-3 text-amber-600" />}
+              <span className={audioUnlocked ? "text-green-600" : "text-amber-600"}>
+                {audioUnlocked ? "Audio Ready" : "Tap to Enable"}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Bell className={`h-3 w-3 ${pushEnabled ? "text-green-600" : "text-muted-foreground"}`} />
-            <span className={pushEnabled ? "text-green-600" : "text-muted-foreground"}>
-              {pushEnabled ? "Push Enabled" : "Push Inactive"}
-            </span>
-          </div>
+          <button
+            onClick={toggleMute}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md transition-colors hover-elevate ${
+              isMuted
+                ? "bg-muted text-muted-foreground"
+                : "bg-primary/10 text-primary"
+            }`}
+            aria-label={isMuted ? "Unmute sounds" : "Mute sounds"}
+          >
+            {isMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+            <span>{isMuted ? "Muted" : "Sound On"}</span>
+          </button>
         </div>
+
       </div>
     </div>
   );
