@@ -1,0 +1,124 @@
+You're encountering a **Vite build/runtime instability** caused by **orphaned or missing chunk files** referenced by one or more dependencies (likely `html5-qrcode` or another dynamically imported library). These warnings:
+
+```
+The file does not exist at "/home/runner/workspace/node_modules/.vite/deps/chunk-XXXX.js?v=..."
+```
+
+indicate that **Vite’s dependency pre-bundling system** expects certain chunks to exist, but they were **not generated during optimization**, leading to broken imports and potential crashes under load (e.g., in Playwright tests or real browser usage).
+
+---
+
+### ✅ Immediate Fix: Exclude Problematic Dependencies from Vite Optimization
+
+Since your app is already **feature-complete** and you **do not need to rewrite it in Flask**, the fastest path to stability is to **disable Vite’s auto-optimization for the problematic package(s)**.
+
+#### Step 1: Identify the Offending Dependency
+From your logs and project context, the most likely culprit is:
+- `html5-qrcode` (used for QR scanning in-browser)
+
+#### Step 2: Update `vite.config.ts`
+
+Add the following to your Vite config:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5000,
+  },
+  optimizeDeps: {
+    // Exclude dynamic/import-heavy libraries that break Vite's chunking
+    exclude: ['html5-qrcode'],
+  },
+  build: {
+    commonjsOptions: {
+      include: [/html5-qrcode/, /node_modules/],
+    },
+  },
+});
+```
+
+> 💡 This tells Vite: _“Don’t try to pre-bundle or split `html5-qrcode` — just leave it as-is in node_modules.”_
+
+#### Step 3: Clear Vite Cache & Reinstall
+
+Run these commands in your project root:
+
+```bash
+# Stop dev server (Ctrl+C)
+
+# Clear Vite's internal cache
+rm -rf node_modules/.vite
+rm -rf .vite
+
+# Optional: Reinstall html5-qrcode cleanly
+npm uninstall html5-qrcode
+npm install html5-qrcode@latest
+
+# Restart
+npm run dev
+```
+
+This forces Vite to **re-resolve dependencies without stale chunk references**.
+
+---
+
+### 🔍 Why This Happens
+
+- `html5-qrcode` uses **dynamic imports** and **Web Worker loading** internally.
+- Vite tries to **pre-bundle it into optimized chunks**, but fails to generate all required sub-chunks.
+- On page load (especially under test automation), Vite attempts to fetch a `.js` chunk that doesn’t exist → **404 + runtime error**.
+
+By excluding it from optimization, the library loads **as a standard CommonJS/ESM module**, avoiding Vite’s fragile code-splitting for this specific package.
+
+---
+
+### ✅ Verification
+
+After applying the fix:
+
+1. The **chunk warnings should disappear** from the console.
+2. The **QR scanner should load reliably** on `/order/:id`.
+3. **Playwright or manual browser tests** should pass consistently.
+4. **Audio + WebSocket + Push** should all work as designed.
+
+---
+
+### 🚫 Do NOT Switch to Flask
+
+Your current **Node.js + React + WebSocket + AudioManager** stack already implements:
+- Bidirectional messaging  
+- Audio alerts with iOS support  
+- Real-time updates  
+- Service requests  
+- PWA capabilities  
+
+Rewriting this in Flask would **lose all advanced features** and take weeks. The issue is **purely a Vite configuration problem**, not an architectural flaw.
+
+---
+
+### Final Tip: Add Health Check (Optional)
+
+In your frontend, add a quick startup validator:
+
+```tsx
+// In main.tsx or App.tsx
+useEffect(() => {
+  if (!('serviceWorker' in navigator)) {
+    console.warn('Service Worker not supported');
+  }
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    alert('Audio alerts not supported on this device.');
+  }
+}, []);
+```
+
+This won’t fix the chunk issue, but helps diagnose client-side gaps.
+
+---
+
+Let me know if you'd like me to generate the full `vite.config.ts` patch or help verify the QR scanner integration!
