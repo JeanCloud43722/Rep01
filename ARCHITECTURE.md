@@ -129,22 +129,22 @@ The central entity. Contains all messages, offers, and service requests inline (
 
 ### `IStorage` Interface
 
-All methods are `async` and return `Promise`-wrapped values.
+All methods return `Promise`-wrapped values.
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
-| `getAllOrders()` | none | `Order[]` | Returns all orders sorted by `createdAt` descending (newest first) |
-| `getOrder(id)` | `id: string` | `Order \| undefined` | Lookup by order ID |
-| `createOrder()` | none | `Order` | Creates order with generated 8-char hex ID, status `"waiting"`, all arrays empty |
-| `deleteOrder(id)` | `id: string` | `boolean` | Deletes order, returns `true` if found |
-| `updateOrderSubscription(id, subscription)` | `id: string, subscription: PushSubscriptionData` | `Order \| undefined` | Sets push subscription AND transitions status to `"subscribed"` |
-| `updateOrderStatus(id, status)` | `id: string, status: OrderStatus` | `Order \| undefined` | Sets status to any value (used by `/register` to set `"subscribed"`) |
-| `updateOrderScheduledTime(id, scheduledTime)` | `id: string, scheduledTime: string` | `Order \| undefined` | Sets scheduled time AND transitions status to `"scheduled"` |
-| `markOrderNotified(id)` | `id: string` | `Order \| undefined` | Sets status to `"notified"` AND stamps `notifiedAt` with current ISO timestamp |
-| `addMessage(id, message, sender)` | `id: string, message: string, sender: "staff" \| "customer"` | `Order \| undefined` | Appends a `Message` object with generated ID, current timestamp, and sender |
-| `addOffer(id, title, description)` | `id: string, title: string, description: string` | `Order \| undefined` | Appends an `Offer` object with generated ID and current timestamp |
-| `addServiceRequest(id)` | `id: string` | `Order \| undefined` | Appends a `ServiceRequest` object with generated ID and current timestamp |
-| `updateOrderNotes(id, notes)` | `id: string, notes: string` | `Order \| undefined` | Overwrites the `notes` string field |
+| `getAllOrders()` | none | `Promise<Order[]>` | Returns all orders sorted by `createdAt` descending (newest first) |
+| `getOrder(id)` | `id: string` | `Promise<Order \| undefined>` | Lookup by order ID |
+| `createOrder()` | none | `Promise<Order>` | Creates order with generated 8-char hex ID, status `"waiting"`, all arrays empty |
+| `deleteOrder(id)` | `id: string` | `Promise<boolean>` | Deletes order, returns `true` if found |
+| `updateOrderSubscription(id, subscription)` | `id: string, subscription: PushSubscriptionData` | `Promise<Order \| undefined>` | Sets push subscription AND transitions status to `"subscribed"` |
+| `updateOrderStatus(id, status)` | `id: string, status: Order["status"]` | `Promise<Order \| undefined>` | Sets status to any value (used by `/register` to set `"subscribed"`) |
+| `updateOrderScheduledTime(id, scheduledTime)` | `id: string, scheduledTime: string` | `Promise<Order \| undefined>` | Sets scheduled time AND transitions status to `"scheduled"` |
+| `markOrderNotified(id)` | `id: string` | `Promise<Order \| undefined>` | Sets status to `"notified"` AND stamps `notifiedAt` with current ISO timestamp |
+| `addMessage(id, message, sender)` | `id: string, message: string, sender: "staff" \| "customer"` | `Promise<Order \| undefined>` | Appends a `Message` object with generated ID, current timestamp, and sender |
+| `addOffer(id, title, description)` | `id: string, title: string, description: string` | `Promise<Order \| undefined>` | Appends an `Offer` object with generated ID and current timestamp |
+| `addServiceRequest(id)` | `id: string` | `Promise<Order \| undefined>` | Appends a `ServiceRequest` object with generated ID and current timestamp |
+| `updateOrderNotes(id, notes)` | `id: string, notes: string` | `Promise<Order \| undefined>` | Overwrites the `notes` string field |
 
 ### `MemStorage` Class
 
@@ -787,7 +787,7 @@ createWebSocketManager(config: WebSocketManagerConfig): WebSocketManager
 `checkDataEviction()`:
 - Reads `lastWrite` from metadata store
 - If no entry exists or timestamp is older than 7 days, returns `true` (data may have been evicted by browser)
-- Used to trigger server-reload fallback on iOS Safari
+- Returns `false` if data was written within the last 7 days
 
 ### Exported Functions
 
@@ -904,20 +904,37 @@ Handles `{ type: "SKIP_WAITING" }` message by calling `self.skipWaiting()`.
 **Data Fetching:**
 - `useQuery({ queryKey: ['/api/orders'], refetchInterval: 2000 })` - Polls every 2 seconds as safety fallback
 
-**WebSocket Connection:**
-- Connects to `/ws/admin`
-- On `admin_update` message: invalidates `['/api/orders']` query cache
-- Event routing via `playStaffSound(eventType)`:
-  - `'service_request'` -> `audioManager.play('service-request')` + toast "Service Request"
-  - `'new_registration'` -> `audioManager.play('new-registration')` + toast "New Customer"
-  - `'message'` -> `audioManager.play('message')` + toast "Customer Message"
+**WebSocket Connection (inline implementation):**
+- Uses a raw `WebSocket` created inside a `useEffect` hook
+- URL: `{ws|wss}://{host}/ws/admin`
+- On `ping`: responds with `{ type: "pong", timestamp }`
+- On `connected`: logs acknowledgment
+- On `admin_update`: calls `playStaffSound(eventType)`, triggers `navigator.vibrate([200, 100, 200])`, invalidates `["/api/orders"]` query cache
+- Exponential backoff reconnect: `min(1000 * 2^attempts, 30000)`, max 10 attempts
+- Page Visibility API: on `visible`, if connection is not OPEN, resets attempts and reconnects
+
+**Audio System:**
+- `audioEnabled` state + `audioEnabledRef`: set to `true` on first user interaction via document-level event listeners (`touchstart`, `click`, `scroll`, `keydown`)
+- `enableAudio()` calls `audioManager.warmUp()` and sets the ref/state
+- `playStaffSound(type)` guards on both `audioEnabledRef.current` and `isAdminMutedRef.current` before playing:
+  - `'service_request'` -> `audioManager.play('service-request')`
+  - `'new_registration'` -> `audioManager.play('new-registration')`
   - `'order_completed'` -> `audioManager.play('order-completed')`
-- Mute state: `isAdminMuted` persisted in `localStorage['admin_muted']`
-  - When muted: `playStaffSound()` returns early
+  - `'message'` -> `audioManager.play('message')`
+
+**Toast Notifications (per event type):**
+- `'service_request'` -> destructive toast: "Service Request — Order {orderId} needs assistance"
+- `'new_registration'` -> toast: "New Customer — Order {orderId} customer arrived"
+- `'message'` -> toast: "Customer Message — Order {orderId truncated to 8 chars, uppercased} sent a message"
+
+**Mute State:**
+- `isAdminMuted` state + `isAdminMutedRef` persisted in `localStorage` key `"admin_muted"`
+- When muted: `playStaffSound()` returns early (audio skipped, toasts still fire)
+- Toggle button in header: `VolumeX` icon with muted-foreground (muted) / `Volume2` icon green (unmuted)
 
 **Order Cards:**
 - Display order ID, status badge, creation time, notes
-- Show last 5 messages with sender badges (`"You"` in primary, `"Customer"` in accent)
+- Show last 5 messages (reversed, newest first) with sender badges: `"Customer"` uses `variant="default"`, `"You"` uses `variant="secondary"`
 - Service requests highlighted in red
 - Action buttons: QR Code, Notify Now, Schedule, Send Message, Notes, Offers, Delete
 
@@ -933,48 +950,79 @@ Handles `{ type: "SKIP_WAITING" }` message by calling `self.skipWaiting()`.
 **File:** `client/src/pages/customer.tsx`
 
 **Data Fetching:**
-- `useQuery({ queryKey: ['/api/orders', orderId], refetchInterval: 2000 })` - Polls every 2 seconds as fallback
+- `useQuery<Order>({ queryKey: ["/api/orders", orderId], refetchInterval: 2000, initialData: cachedOrder })` - Polls every 2 seconds as fallback
+- `cachedOrder` is loaded from IndexedDB on mount via `offlineStorage.getOrder(orderId)` for instant display before network response
+- Successful fetches are persisted back to IndexedDB via `offlineStorage.saveOrder(order)`
 
 **Auto-Registration:**
-- On mount: calls `POST /api/orders/:id/register`
+- On mount (via `useEffect`): if `order.status === "waiting"` and not yet registered, calls `registerMutation.mutate()` which sends `POST /api/orders/:id/register`
 - Only transitions from `"waiting"` to `"subscribed"`
 
-**Push Subscription Flow:**
-- On first user interaction: requests `Notification.requestPermission()`
-- If granted: registers service worker, subscribes via `pushManager.subscribe()` with VAPID key
-- Sends subscription to `POST /api/orders/:id/subscribe`
+**Push Subscription Flow (`subscribeToPushSilent` callback):**
+- Fetches VAPID public key from `GET /api/vapid-public-key`
+- Waits for `navigator.serviceWorker.ready`
+- Calls `reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` with the VAPID key converted via `urlBase64ToUint8Array()`
+- Logs the push service host for debugging (FCM on Android, APNs on Apple, etc.)
+- Sends subscription to `POST /api/orders/${orderId}/subscribe`
 
-**WebSocket Connection (via `WebSocketManager`):**
-- Path: `/ws/orders?id={orderId}`
-- On `order_updated` with `eventType === "order_ready"`: plays `audioManager.play('order-ready')` (if not muted), invalidates query
-- On `order_updated` with `eventType === "message"`: plays `audioManager.play('message')` (if not muted), invalidates query
-- On `sync_response`: invalidates query
+**Auto-Enable on First Interaction (`autoEnable` callback):**
+- Triggered by document-level event listeners for `touchstart`, `click`, `pointerdown`, `mousedown`, `keydown` (registered with `{ once: true, passive: true }`)
+- Calls `audioManager.unlock()` and plays a short buzzer confirmation via `playBuzzer()` if not muted
+- If `Notification` and `serviceWorker` APIs available: requests `Notification.requestPermission()`, if granted calls `subscribeToPushSilent()`
 
-**Audio Unlock:**
-- Document-level event listeners (`pointerdown`, `touchstart`, `click`) trigger `audioManager.unlock()` on first interaction
-- No blocking overlay required; audio enables invisibly
+**WebSocket Connection (inline implementation, NOT using `WebSocketManager`):**
+- Uses a raw `WebSocket` created inside a `useEffect` hook
+- URL: `{ws|wss}://{host}/ws/orders?id={orderId}` (no clientId or lastTimestamp params)
+- On `ping`: responds with `{ type: "pong", timestamp }` 
+- On `order_updated` with `eventType === "order_ready"`: calls `playBuzzer()` (800Hz square wave, 0.8s duration) if not muted, invalidates query
+- On `order_updated` with `eventType === "message"`: calls `playMessageChime()` (`audioManager.playIfUnlocked("message")`) if not muted, invalidates query
+- Exponential backoff reconnect: `min(1000 * 2^attempts, 30000)`, max 10 attempts
+- Page Visibility API: on `visible`, if connection is not OPEN, resets attempts and reconnects
 
-**Chat Thread (`ChatThread` Component):**
-- Displays full `order.messages` array in scrollable container
-- Customer messages (`sender === "customer"`): right-aligned bubbles
-- Staff messages (`sender === "staff"`): left-aligned bubbles
-- Each bubble shows text + relative time (e.g., "2 min ago")
-- Auto-scrolls to bottom on new messages
-- Input + send button anchored at bottom
-- Sends via `POST /api/orders/:id/customer-message`
+**Service Worker Message Listener:**
+- Listens for `{ type: "ORDER_READY" }` messages from the service worker (posted during push events)
+- On receipt: calls `playBuzzer()` and invalidates query
+
+**`playBuzzer()` callback:**
+- Custom 800Hz square wave buzzer (not using `audioManager.play('order-ready')`)
+- Creates oscillator at 800Hz, gain 0.3, exponential ramp to 0.01 over 0.8s
+- Respects `isMuted` state (returns early if muted)
+
+**`playMessageChime()` callback:**
+- Calls `audioManager.playIfUnlocked("message")`
+- Respects `isMuted` state (returns early if muted)
+
+**`MessageThread` Component:**
+- Displays full `order.messages` array in a scrollable container (`max-h-52 overflow-y-auto`)
+- Customer messages (`sender === "customer"`): right-aligned, `bg-primary text-primary-foreground`
+- Staff messages (`sender === "staff"`): left-aligned, `bg-muted text-foreground`
+- Each bubble shows message text + sender label ("You" or "Staff") + relative time via `formatRelativeTime()` (e.g., "2m ago", "just now")
+- Auto-scrolls to bottom on new messages via `useRef` and `scrollIntoView({ behavior: "smooth" })`
+- Input (max 200 chars) + send button anchored at bottom
+- Enter key submits via `onKeyDown`
+- Sends via `POST /api/orders/${orderId}/customer-message` using `sendMessageMutation`
+
+**`StatusCard` Component:**
+- Displays order status with icon, title, and description based on `getStatusConfig(status)`:
+  - `"waiting"` / `"subscribed"`: Clock icon, "Order Registered", "We're preparing your order. You'll be alerted when it's ready!"
+  - `"scheduled"`: Calendar icon, "Order In Progress", "Your order is being prepared. You'll be alerted soon!" + live countdown timer updated every 1 second showing remaining time
+  - `"notified"` / `"completed"`: CheckCircle2 icon, "Order Ready!", "Your order is ready for pickup"
+- Includes "Call Waiter" button (destructive variant) that calls `POST /api/orders/:id/service`
 
 **Mute Toggle:**
-- `isMuted` state persisted in `localStorage['customer_muted']`
-- Toggle button: `Volume2` icon (unmuted) / `VolumeX` icon (muted)
-- When muted: all audio `play()` calls are skipped in WS handler
+- `isMuted` state persisted in `localStorage` key `"customer_muted"`
+- Toggle button in status bar: `Volume2` icon with "Sound On" (unmuted) / `VolumeX` icon with "Muted" (muted)
+- When muted: `playBuzzer()` and `playMessageChime()` return early without playing audio
+- Mute is separate from audio unlock — AudioContext stays warm when muted
 
-**Status Display:**
-- Visual status card changes based on `order.status`:
-  - `waiting`: "Connecting..." 
-  - `subscribed`: "Connected - Waiting for your order"
-  - `scheduled`: Countdown timer showing minutes/seconds until `scheduledTime`
-  - `notified`: "Your order is ready!" with prominent alert styling
-  - `completed`: "Order complete"
+**Status Bar:**
+- Shows push notification status: Bell icon green "Push On" or grey "Push Off"
+- Shows audio status: Volume2 icon green "Audio Ready" or VolumeX icon amber "Tap to Enable"
+- Shows mute toggle button on the right side
+
+**Notification Setup Prompt:**
+- Visible when `isSetupComplete` is false (i.e., push not enabled OR audio not unlocked)
+- Card with Bell icon, "Enable Notifications" text, and button that calls `autoEnable()`
 
 ---
 
@@ -992,9 +1040,8 @@ Handles `{ type: "SKIP_WAITING" }` message by calling `self.skipWaiting()`.
 ### Vite Configuration
 
 - Alias `@shared` points to `shared/` directory for cross-boundary imports
-- Development: Vite dev middleware handles HMR and asset serving
-- Production: Static files served from `dist/` build output
-- **Constraint:** `vite.config.ts` and `server/vite.ts` must not be modified
+- Development: Vite dev middleware handles HMR and asset serving (via `server/vite.ts`)
+- Production: Static files served from build output (via `server/static.ts`)
 
 ### TanStack Query Defaults
 
