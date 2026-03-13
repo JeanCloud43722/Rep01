@@ -520,6 +520,7 @@ function NotifyModal({
               id="notification-message"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
               data-testid="input-notification-message"
               maxLength={100}
             />
@@ -587,6 +588,7 @@ function MessageModal({
               placeholder="e.g., Your order is almost ready..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && message.trim()) handleSubmit(); }}
               data-testid="input-custom-message"
               maxLength={200}
             />
