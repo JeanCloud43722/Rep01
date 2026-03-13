@@ -354,7 +354,62 @@ export default function CustomerPage() {
     return () => events.forEach((e) => document.removeEventListener(e, handle));
   }, [autoEnable]);
 
+  useEffect(() => {
+    const resumeOnInteraction = async () => {
+      const ctx = audioManager.getContext();
+      if (ctx && ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+          console.log("[ResumeAudio] AudioContext resumed on interaction");
+        } catch (e) {
+          console.warn("[ResumeAudio] resume failed:", e);
+        }
+      }
+      if (!audioManager.isUnlocked) {
+        try {
+          const ok = await audioManager.unlock();
+          if (ok) setAudioUnlocked(true);
+        } catch {}
+      }
+      if (
+        "Notification" in window &&
+        "serviceWorker" in navigator &&
+        orderId &&
+        !pushEnabled &&
+        Notification.permission === "default"
+      ) {
+        try {
+          const perm = await Notification.requestPermission();
+          if (perm === "granted") subscribeToPushSilent();
+        } catch {}
+      }
+    };
+    const interactionEvents = ["touchstart", "click", "pointerdown", "mousedown", "keydown"];
+    interactionEvents.forEach((e) =>
+      document.addEventListener(e, resumeOnInteraction, { passive: true })
+    );
+    return () =>
+      interactionEvents.forEach((e) =>
+        document.removeEventListener(e, resumeOnInteraction)
+      );
+  }, [orderId, pushEnabled, subscribeToPushSilent]);
+
   useEffect(() => audioManager.onUnlockChange(setAudioUnlocked), []);
+
+  useEffect(() => {
+    const handleVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      const ctx = audioManager.getContext();
+      if (ctx && ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+          console.log("[Visibility] AudioContext resumed on page visible");
+        } catch {}
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisible);
+    return () => document.removeEventListener("visibilitychange", handleVisible);
+  }, []);
 
   // ── offline cache ──
   useEffect(() => {

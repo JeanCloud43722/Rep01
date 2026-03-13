@@ -211,39 +211,104 @@ All endpoints are prefixed with `/api/`. Request bodies are validated with Zod s
 | POST | `/api/orders/:id/service` | none | `Order` | 200, 404, 500 | `notifyOrderUpdate(id, "service_request")` + `notifyAdminUpdate(id, "service_request")` |
 | PATCH | `/api/orders/:id/notes` | `{ notes: string }` | `Order` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "status_update")` + `notifyAdminUpdate(id, "status_update")` |
 
-### Endpoint Details
+### Per-Endpoint Details
 
-**POST `/api/orders/:id/register`**
-- Only transitions status if current status is `"waiting"` (idempotent for re-visits)
-- Called automatically when customer loads the order page
+**GET `/api/vapid-public-key`**
+- No request body
+- Response: `{ publicKey: string }` (the VAPID public key for push subscription)
+- Side effects: none
+- WS notifications: none
 
-**POST `/api/orders/:id/subscribe`**
-- Validates subscription body against `pushSubscriptionSchema`
-- Calls `storage.updateOrderSubscription()` which sets status to `"subscribed"`
+**GET `/api/orders`**
+- No request body
+- Response: `Order[]` sorted by `createdAt` descending
+- Calls: `storage.getAllOrders()`
+- WS notifications: none
 
-**POST `/api/orders/:id/trigger`**
-- Delegates to `sendNotification()` which: writes message to history, marks order notified, fires WS events, and fires push notifications with 3-attempt retry
+**GET `/api/orders/:id`**
+- No request body
+- Response: `Order` on success, `{ error: "Order not found" }` on 404
+- Calls: `storage.getOrder(req.params.id)`
+- WS notifications: none
 
-**POST `/api/orders/:id/message`**
-- Staff-to-customer message (sender = `"staff"`)
-- Fires both customer and admin WS notifications
-- Also fires 3-attempt push notifications if subscription exists
-
-**POST `/api/orders/:id/customer-message`**
-- Customer-to-staff message (sender = `"customer"`)
-- Fires both customer and admin WS notifications
-- Does NOT fire push notifications (staff uses admin dashboard WebSocket)
-
-**POST `/api/orders/:id/schedule`**
-- Validates `scheduledTime` is in the future
-- Cancels any existing scheduled job for this order
-- Calls `storage.updateOrderScheduledTime()` which sets status to `"scheduled"`
-- Creates `node-schedule` job via `scheduleNotification()`
-- Fires immediate WS notifications so customer sees status change without polling delay
+**POST `/api/orders`**
+- No request body
+- Response (201): newly created `Order` with status `"waiting"`, empty arrays, generated ID
+- Calls: `storage.createOrder()`
+- WS notifications: none
 
 **DELETE `/api/orders/:id`**
-- Cancels any scheduled `node-schedule` job before deleting
-- Returns 204 No Content on success
+- No request body
+- Response (204): empty body on success, `{ error: "Order not found" }` on 404
+- Side effects: cancels any `node-schedule` job in `scheduledJobs` for this order ID before deletion
+- Calls: `storage.deleteOrder(req.params.id)`
+- WS notifications: none
+
+**POST `/api/orders/:id/register`**
+- No request body
+- Response: updated `Order` (or unchanged order if status was not `"waiting"`)
+- Condition: only transitions status if current `order.status === "waiting"` (idempotent for re-visits)
+- Calls: `storage.updateOrderStatus(req.params.id, "subscribed")`
+- WS notifications: `notifyAdminUpdate(req.params.id, "new_registration")` (only when transition occurs)
+
+**POST `/api/orders/:id/subscribe`**
+- Request body validated with: `z.object({ subscription: pushSubscriptionSchema })`
+- Response: updated `Order` with push subscription and status `"subscribed"`
+- Calls: `storage.updateOrderSubscription(req.params.id, subscription)`
+- WS notifications: `notifyAdminUpdate(req.params.id, "status_update")`
+
+**POST `/api/orders/:id/trigger`**
+- Request body: `{ message?: string }` (extracted from `req.body`, not Zod-validated)
+- Response: `{ success: true }`
+- Delegates to `sendNotification(req.params.id, message)` which:
+  1. Writes message to order history via `storage.addMessage()`
+  2. Marks order notified via `storage.markOrderNotified()`
+  3. Fires `notifyOrderUpdate(id, "order_ready")` + `notifyAdminUpdate(id, "order_ready")`
+  4. Fires 3-attempt push notifications at 0s/2s/4s (if subscription exists)
+
+**POST `/api/orders/:id/message`**
+- Request body validated with: `z.object({ message: z.string().min(1).max(200) })`
+- Response: `{ success: true }`
+- Sender: `"staff"`
+- Calls: `storage.addMessage(req.params.id, message, "staff")`
+- WS notifications: `notifyOrderUpdate(req.params.id, "message")` + `notifyAdminUpdate(req.params.id, "message")`
+- Push: if subscription exists, fires 3-attempt push notifications at 0s/2s/4s (fire-and-forget)
+
+**POST `/api/orders/:id/customer-message`**
+- Request body validated with: `z.object({ message: z.string().min(1).max(200) })`
+- Response: `{ success: true }`
+- Sender: `"customer"`
+- Calls: `storage.addMessage(req.params.id, message, "customer")`
+- WS notifications: `notifyOrderUpdate(req.params.id, "message")` + `notifyAdminUpdate(req.params.id, "message")`
+- Push: does NOT fire push notifications (staff uses admin dashboard WebSocket)
+
+**POST `/api/orders/:id/schedule`**
+- Request body validated with: `z.object({ scheduledTime: z.string(), message: z.string().optional() })`
+- Response: updated `Order` with status `"scheduled"` and `scheduledTime` set
+- Validation: returns 400 if `scheduledDate <= now`
+- Side effects:
+  1. Cancels any existing `node-schedule` job for this order ID
+  2. Calls `storage.updateOrderScheduledTime(req.params.id, scheduledTime)` (sets status to `"scheduled"`)
+  3. Creates new `node-schedule` job via `scheduleNotification(req.params.id, scheduledDate, message)`
+- WS notifications: `notifyOrderUpdate(req.params.id, "status_update")` + `notifyAdminUpdate(req.params.id, "status_update")` (fired immediately so customer sees countdown without polling delay)
+
+**POST `/api/orders/:id/offers`**
+- Request body validated with: `z.object({ title: z.string().min(1), description: z.string().min(1) })`
+- Response: updated `Order` with new offer appended to `offers` array
+- Calls: `storage.addOffer(req.params.id, title, description)`
+- WS notifications: `notifyOrderUpdate(req.params.id, "offer")` + `notifyAdminUpdate(req.params.id, "offer")`
+
+**POST `/api/orders/:id/service`**
+- No request body
+- Response: updated `Order` with new service request appended to `serviceRequests` array
+- Calls: `storage.addServiceRequest(req.params.id)`
+- WS notifications: `notifyOrderUpdate(req.params.id, "service_request")` + `notifyAdminUpdate(req.params.id, "service_request")`
+
+**PATCH `/api/orders/:id/notes`**
+- Request body validated with: `z.object({ notes: z.string().max(500) })`
+- Response: updated `Order` with `notes` field overwritten
+- Calls: `storage.updateOrderNotes(req.params.id, notes)`
+- WS notifications: `notifyOrderUpdate(req.params.id, "status_update")` + `notifyAdminUpdate(req.params.id, "status_update")`
 
 ---
 
@@ -347,9 +412,9 @@ HEARTBEAT_TIMEOUT  = 5000   // (defined but used implicitly via isAlive flag)
 
 ### VAPID Key Management
 
-**`getVapidKeys()`:**
-1. Reads `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` from environment variables
-2. If either is missing, generates ephemeral keys via `webPush.generateVAPIDKeys()` and logs a warning
+**`function getVapidKeys(): { publicKey: string; privateKey: string }`**
+1. Reads `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` from `process.env`
+2. If either is missing, generates ephemeral keys via `webPush.generateVAPIDKeys()` and logs a warning with the generated keys
 3. Returns `{ publicKey, privateKey }`
 
 **VAPID Configuration:**
@@ -361,15 +426,15 @@ webPush.setVapidDetails(
 );
 ```
 
-### `sendSinglePushNotification(orderId, message?, notificationNumber?)`
+### `async sendSinglePushNotification(orderId: string, message?: string, notificationNumber: number = 1): Promise<boolean>`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `orderId` | `string` | required | Target order |
-| `message` | `string` | `undefined` | Custom notification body |
+| `message` | `string \| undefined` | `undefined` | Custom notification body |
 | `notificationNumber` | `number` | `1` | Used for logging (e.g., "reminder 2/3") |
 
-**Returns:** `boolean` - `true` if push was sent successfully, `false` on error or no subscription.
+**Returns:** `Promise<boolean>` - resolves to `true` if push was sent successfully, `false` on error or no subscription.
 
 **Behavior:**
 1. Fetches order from storage
@@ -378,9 +443,9 @@ webPush.setVapidDetails(
 4. Calls `webPush.sendNotification()` with the subscription endpoint and keys
 5. Catches and logs any errors, returns `false` on failure
 
-### `sendNotification(orderId, message?)`
+### `async sendNotification(orderId: string, message?: string): Promise<boolean>`
 
-The main notification orchestrator. Called by `/trigger` endpoint and by scheduled jobs.
+The main notification orchestrator. Called by `POST /api/orders/:id/trigger` endpoint and by scheduled jobs.
 
 **Sequence:**
 1. Fetch order from storage (throws if not found)
@@ -394,7 +459,7 @@ The main notification orchestrator. Called by `/trigger` endpoint and by schedul
    - Attempt 3: after 4000ms (`setTimeout`)
    - All attempts use `.catch(() => {})` (fire-and-forget)
 
-### `scheduleNotification(orderId, scheduledDate, message?)`
+### `scheduleNotification(orderId: string, scheduledDate: Date, message?: string): schedule.Job | null`
 
 Uses `node-schedule` to create a future job.
 
@@ -404,9 +469,9 @@ Uses `node-schedule` to create a future job.
 3. Stores the job reference in `scheduledJobs: Map<string, schedule.Job>`
 4. Returns the `schedule.Job` instance (or `null` if scheduling failed)
 
-### `restoreScheduledNotifications()`
+### `async restoreScheduledNotifications(): Promise<void>`
 
-Called once during server startup (`registerRoutes`).
+Called once during server startup (inside `registerRoutes`).
 
 **Behavior:**
 1. Fetches all orders from storage

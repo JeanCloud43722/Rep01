@@ -109,6 +109,13 @@ npm run dev  # Start development server on port 5000
 - **PWA Support**: manifest.json with standalone display, Service Worker caching for offline access, Apple meta tags for iOS.
 - **iOS Install Prompt**: Native-style overlay guiding iOS Safari users to "Add to Home Screen" for best experience.
 
+### Persistent AudioContext & Push Recovery
+- **Persistent interaction listeners**: Document-level event listeners (touchstart, click, pointerdown, mousedown, keydown) remain active throughout the session - not just on first interaction
+- **AudioContext resume on interaction**: If AudioContext becomes suspended (e.g., after tab backgrounding on mobile), any user interaction automatically calls `ctx.resume()`
+- **AudioContext resume on visibility**: When page becomes visible again (Page Visibility API), AudioContext is automatically resumed if suspended
+- **Push permission re-prompt**: On any interaction, if push permission is still "default" (not yet decided), the browser permission prompt is shown again
+- **Audio unlock retry**: If AudioManager is not yet unlocked on interaction, `unlock()` is retried automatically
+
 ### Seamless Auto-Enable Notification System
 - **Zero-Friction UX**: No blocking overlays - customers see the page and can interact immediately after scanning QR
 - **Auto-Enable on First Tap**: Audio and push notifications are automatically enabled on ANY user interaction (touch, click, pointerdown) anywhere on the page
