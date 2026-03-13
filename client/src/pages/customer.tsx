@@ -366,7 +366,7 @@ export default function CustomerPage() {
   const { data: order, isLoading } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
-    refetchInterval: 4000,
+    refetchInterval: 2000,
     initialData: cachedOrder || undefined,
   });
 

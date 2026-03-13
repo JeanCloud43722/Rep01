@@ -763,7 +763,7 @@ export default function AdminPage() {
   
   const { data: orders, isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
-    refetchInterval: 4000
+    refetchInterval: 2000
   });
   
   const playStaffSound = useCallback((type: 'service_request' | 'new_registration' | 'order_completed' | 'message') => {

@@ -480,6 +480,8 @@ export async function registerRoutes(
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
+      // Notify admin immediately that push was enabled (status changed to "subscribed")
+      notifyAdminUpdate(req.params.id, "status_update");
       res.json(order);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -609,6 +611,10 @@ export async function registerRoutes(
       
       scheduleNotification(req.params.id, scheduledDate, message);
       
+      // Notify immediately so customer sees "Order In Progress" without waiting for polling
+      notifyOrderUpdate(req.params.id, "status_update");
+      notifyAdminUpdate(req.params.id, "status_update");
+      
       res.json(order);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -675,8 +681,9 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Order not found" });
       }
       
-      // Notify WebSocket subscribers
-      notifyOrderUpdate(req.params.id);
+      // Notify both customer and admin immediately
+      notifyOrderUpdate(req.params.id, "status_update");
+      notifyAdminUpdate(req.params.id, "status_update");
       
       res.json(order);
     } catch (error) {
