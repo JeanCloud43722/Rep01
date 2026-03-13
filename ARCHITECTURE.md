@@ -1170,36 +1170,40 @@ waiting  -->  subscribed  -->  scheduled  -->  notified  -->  completed
 
 | From | To | Triggered By | Endpoint | WS Events |
 |------|----|-------------|----------|-----------|
-| `waiting` | `subscribed` | Customer visits order page | `POST /register` | `notifyAdminUpdate("new_registration")` |
-| `waiting`/`subscribed` | `subscribed` | Customer enables push | `POST /subscribe` | `notifyAdminUpdate("status_update")` |
-| `subscribed` | `scheduled` | Staff schedules notification | `POST /schedule` | `notifyOrderUpdate("status_update")` + `notifyAdminUpdate("status_update")` |
-| any | `notified` | Staff triggers notification (or scheduled job fires) | `POST /trigger` / scheduled job | `notifyOrderUpdate("order_ready")` + `notifyAdminUpdate("order_ready")` |
+| `waiting` | `subscribed` | Customer visits order page | `POST /api/orders/:id/register` | `notifyAdminUpdate("new_registration")` |
+| `waiting`/`subscribed` | `subscribed` | Customer enables push | `POST /api/orders/:id/subscribe` | `notifyAdminUpdate("status_update")` |
+| `subscribed` | `scheduled` | Staff schedules notification | `POST /api/orders/:id/schedule` | `notifyOrderUpdate("status_update")` + `notifyAdminUpdate("status_update")` |
+| any | `notified` | Staff triggers notification (or scheduled job fires) | `POST /api/orders/:id/trigger` / scheduled job | `notifyOrderUpdate("order_ready")` + `notifyAdminUpdate("order_ready")` |
 | any | `completed` | (Not currently exposed via endpoint - would need `updateOrderStatus` call) | - | - |
 
 ### Customer UI Per Status
 
-| Status | Customer Page Display |
-|--------|---------------------|
-| `waiting` | "Connecting..." / loading state |
-| `subscribed` | "Connected - Waiting for your order" |
-| `scheduled` | Countdown timer with remaining minutes:seconds until `scheduledTime` |
-| `notified` | Prominent "Your order is ready!" alert with buzzer sound |
-| `completed` | "Order complete" confirmation |
+Source: `getStatusConfig()` in `client/src/pages/customer.tsx`
+
+| Status | `title` | `description` | Icon | Color |
+|--------|---------|---------------|------|-------|
+| `waiting` | "Order Registered" | "We're preparing your order. You'll be alerted when it's ready!" | `Clock` | `text-primary` |
+| `subscribed` | "Order Registered" | "We're preparing your order. You'll be alerted when it's ready!" | `Clock` | `text-primary` |
+| `scheduled` | "Order In Progress" | "Your order is being prepared. You'll be alerted soon!" + countdown timer | `Calendar` | `text-primary` |
+| `notified` | "Order Ready!" | "Your order is ready for pickup" | `CheckCircle2` | `text-green-600 dark:text-green-500` |
+| `completed` | "Order Ready!" | "Your order is ready for pickup" | `CheckCircle2` | `text-green-600 dark:text-green-500` |
+
+Note: `waiting` and `subscribed` share the same config. `notified` and `completed` share the same config. The `isReady` flag (`order.status === "notified" || order.status === "completed"`) controls the green background circle styling.
 
 ### Side Effects Per Transition
 
-**`waiting` -> `subscribed` (via `/register`):**
+**`waiting` -> `subscribed` (via `POST /api/orders/:id/register`):**
 - Storage: `updateOrderStatus(id, "subscribed")`
 - WS: Admin notified of new registration
 - Audio: Staff hears `new-registration` chime (if admin page open)
 
-**`subscribed` -> `scheduled` (via `/schedule`):**
+**`subscribed` -> `scheduled` (via `POST /api/orders/:id/schedule`):**
 - Storage: `updateOrderScheduledTime(id, scheduledTime)` sets status + time
 - Scheduling: `node-schedule` job created
 - WS: Both customer and admin notified immediately
 - Customer: Sees countdown timer
 
-**any -> `notified` (via `/trigger` or scheduled job):**
+**any -> `notified` (via `POST /api/orders/:id/trigger` or scheduled job):**
 - Storage: `addMessage()` records notification text, `markOrderNotified()` sets status + timestamp
 - WS: Both customer and admin notified
 - Push: 3 push notifications at 0s, 2s, 4s (if subscription exists)
