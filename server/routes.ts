@@ -500,8 +500,11 @@ export async function registerRoutes(
 
     const customerWebSockets = wss.clients.size;
     const adminWebSockets = adminWss.clients.size;
+    const allOrders = await storage.getAllOrders();
+    const totalOrders = allOrders.length;
+    const completedOrders = allOrders.filter(o => o.status === "completed").length;
 
-    logger.debug("Health check", { source: "health", dbConnected, dbResponseTimeMs, customerWebSockets, adminWebSockets });
+    logger.debug("Health check", { source: "health", dbConnected, dbResponseTimeMs, customerWebSockets, adminWebSockets, totalOrders, completedOrders });
 
     res.json({
       status: dbConnected ? "ok" : "degraded",
@@ -510,6 +513,7 @@ export async function registerRoutes(
       version: VERSION,
       database: { connected: dbConnected, responseTimeMs: dbResponseTimeMs },
       connections: { customerWebSockets, adminWebSockets },
+      orders: { total: totalOrders, completed: completedOrders },
     });
   });
 
@@ -910,6 +914,39 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to update notes" });
     }
   });
+
+  // ── Cleanup endpoint ──
+  app.post("/api/orders/cleanup", requireAuth, async (req, res) => {
+    try {
+      const { maxAgeHours } = z.object({
+        maxAgeHours: z.coerce.number().min(1).max(168).default(24)
+      }).parse(req.body);
+
+      const count = await storage.deleteCompletedOrdersOlderThan(maxAgeHours);
+      logger.info("Admin cleanup: removed completed orders", { count, maxAgeHours, source: "cleanup" });
+
+      notifyAdminUpdate("", "status_update");
+
+      res.json({ deletedCount: count, maxAgeHours });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid cleanup parameters" });
+      }
+      res.status(500).json({ error: "Cleanup failed" });
+    }
+  });
+
+  // ── Automatic cleanup interval (every hour) ──
+  setInterval(async () => {
+    try {
+      const count = await storage.deleteCompletedOrdersOlderThan(24);
+      if (count > 0) {
+        logger.info("Auto-cleanup: removed completed orders", { count, maxAgeHours: 24, source: "cleanup" });
+      }
+    } catch (error) {
+      logger.warn("Auto-cleanup failed", { error: String(error), source: "cleanup" });
+    }
+  }, 3600000); // 1 hour
 
   return httpServer;
 }

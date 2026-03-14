@@ -1,0 +1,28 @@
+{
+  "id": 19,
+  "title": "Add Automatic Cleanup of Old Completed Orders",
+  "priority": "P2-Medium",
+  "depends_on": [2, 13],
+  "context": "The database grows indefinitely with no cleanup mechanism. Completed orders accumulate and slow down queries.",
+  "task": "Add automatic cleanup of completed orders older than a configurable retention period.",
+  "detailed_instructions": [
+    "Add to IStorage interface: deleteCompletedOrdersOlderThan(hours: number): Promise<number>.",
+    "Implementation in server/db-storage.ts:",
+    "- DELETE FROM orders WHERE status = 'completed' AND notifiedAt IS NOT NULL AND notifiedAt < NOW() - interval 'N hours'",
+    "- Return count of deleted rows. Child data in JSONB columns is deleted automatically.",
+    "In registerRoutes() in server/routes.ts, after restoring scheduled notifications, add:",
+    "setInterval(async () => { const count = await storage.deleteCompletedOrdersOlderThan(24); if (count > 0) { logger.info('Auto-cleanup: removed completed orders', { count, maxAgeHours: 24 }); } }, 3600000); // every hour",
+    "Add admin endpoint POST /api/orders/cleanup (protected by requireAuth):",
+    "- Body validated with: z.object({ maxAgeHours: z.coerce.number().min(1).max(168).default(24) })",
+    "- Calls storage.deleteCompletedOrdersOlderThan(maxAgeHours)",
+    "- Returns { deletedCount: number, maxAgeHours: number }",
+    "- Fire notifyAdminUpdate('', 'status_update') to refresh admin dashboard",
+    "In admin.tsx, add a 'Clear Completed' button in header (next to 'New Order'):",
+    "- Only show when there are completed orders visible",
+    "- On click: confirmation dialog 'Remove all completed orders older than 24 hours?'",
+    "- On confirm: call POST /api/orders/cleanup, show success toast, invalidate orders query",
+    "In /api/health endpoint (Prompt 5), add totalOrders and completedOrders counts for monitoring database size."
+  ],
+  "replit_note": "Replit PostgreSQL has a 10GB free tier limit. Auto-cleanup ensures the database stays within bounds even with high order volume. The 24-hour retention is configurable per restaurant needs.",
+  "testing_checkpoint": "Create orders, complete them. Wait for auto-cleanup (or trigger manually). Verify completed orders older than threshold are removed. Database row count decreases. Active orders are not affected."
+}

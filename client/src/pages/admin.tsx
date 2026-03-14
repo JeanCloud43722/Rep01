@@ -1155,6 +1155,24 @@ export default function AdminPage() {
               <Plus className="h-4 w-4 mr-2" />
               New Order
             </Button>
+            {completedOrders.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  if (!confirm("Remove all completed orders older than 24 hours?")) return;
+                  try {
+                    await apiRequest("POST", "/api/orders/cleanup", { maxAgeHours: 24 });
+                    toast({ title: "Success", description: "Completed orders removed" });
+                    queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+                  } catch (error) {
+                    toast({ title: "Error", description: "Cleanup failed", variant: "destructive" });
+                  }
+                }}
+                data-testid="button-cleanup"
+              >
+                Clear Completed
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

@@ -38,6 +38,7 @@ export interface IStorage {
   addOffer(id: string, title: string, description: string): Promise<Order | undefined>;
   addServiceRequest(id: string): Promise<Order | undefined>;
   updateOrderNotes(id: string, notes: string): Promise<Order | undefined>;
+  deleteCompletedOrdersOlderThan(hours: number): Promise<number>;
 }
 
 export class MemStorage implements IStorage {
@@ -186,6 +187,25 @@ export class MemStorage implements IStorage {
     order.notes = notes;
     this.orders.set(id, order);
     return order;
+  }
+
+  async deleteCompletedOrdersOlderThan(hours: number): Promise<number> {
+    const threshold = new Date(Date.now() - hours * 3600000);
+    let count = 0;
+    const idsToDelete: string[] = [];
+    
+    this.orders.forEach((order, id) => {
+      if (order.status === "completed" && order.notifiedAt && new Date(order.notifiedAt) < threshold) {
+        idsToDelete.push(id);
+      }
+    });
+    
+    idsToDelete.forEach(id => {
+      this.orders.delete(id);
+      count++;
+    });
+    
+    return count;
   }
 }
 
