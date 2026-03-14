@@ -1,0 +1,25 @@
+{
+  "id": 17,
+  "title": "Implement Offline-First Architecture with IndexedDB Outbox",
+  "priority": "P1-High",
+  "depends_on": [2],
+  "context": "The app caches data in IndexedDB but lacks a cohesive strategy for queuing actions while offline and syncing when network returns.",
+  "task": "Add an 'outbox' object store to queue offline actions and sync them when online.",
+  "detailed_instructions": [
+    "In client/src/lib/indexed-db-storage.ts, add an 'outbox' object store in the onupgradeneeded handler:",
+    "- Key: auto-increment",
+    "- Fields: url (text), method (text), body (json), createdAt (timestamp)",
+    "Bump DB_VERSION to 2.",
+    "Add syncOrderFromServer(orderId) function: try fetch from network, if successful save to IndexedDB cache and return. If network fails, return cached order from IndexedDB. Return null if neither available.",
+    "Add isStale(orderId) function: check if cached order's lastWrite timestamp is older than 30 seconds.",
+    "In customer.tsx, use syncOrderFromServer as a custom queryFn for the order query instead of the default getQueryFn.",
+    "Add offline indicator: when navigator.onLine === false, show amber banner: 'You are offline. Some features may be limited.'",
+    "Create addToOutbox(url, method, body) function: save the request to the outbox store.",
+    "Create syncOutbox() function: read all outbox entries, replay each via fetch(), remove successful ones, keep failed ones for next sync.",
+    "Call syncOutbox() on window 'online' event and on WebSocket reconnection.",
+    "In customer.tsx message send: wrap API call in try-catch. If it fails and navigator.onLine === false, call addToOutbox and show toast 'Message queued — will send when online'.",
+    "Same for service request: if offline, queue and show 'Service request queued'."
+  ],
+  "replit_note": "Test by toggling airplane mode on mobile device or using Chrome DevTools Network offline simulation.",
+  "testing_checkpoint": "Go offline — amber banner shows. Send message while offline — queued toast appears. Come online — outbox drains, messages sent successfully. Refresh while offline — cached order displays."
+}

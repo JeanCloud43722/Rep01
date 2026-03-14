@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getQueryFn } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
 import { offlineStorage } from "@/lib/indexed-db-storage";
 import { createWebSocketManager } from "@/lib/websocket-manager";
 import { formatOrderId } from "@/lib/format-utils";
+import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -254,6 +255,7 @@ function LoadingState() {
 // ─── main page ───────────────────────────────────────────────────────────────
 
 export default function CustomerPage() {
+  const { toast } = useToast();
   const params = useParams<{ id: string }>();
   const orderId = params.id;
 
@@ -389,6 +391,24 @@ export default function CustomerPage() {
   // ── AudioContext lifecycle cleanup ──
   useEffect(() => { return () => audioManager.cleanup(); }, []);
 
+  // ── offline indicator + outbox sync ──
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOnline(true);
+      await offlineStorage.syncOutbox();
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+    };
+    const handleOffline = () => setIsOnline(false);
+    
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [orderId]);
+
   useEffect(() => {
     const handleVisible = async () => {
       if (document.visibilityState !== "visible") return;
@@ -412,11 +432,12 @@ export default function CustomerPage() {
 
   // ── query — polling slows down when WebSocket is healthy ──
   const pollInterval = wsConnected ? 15000 : 3000;
-  const { data: order, isLoading } = useQuery<Order>({
+  const { data: order, isLoading } = useQuery<Order | null>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
     refetchInterval: pollInterval,
     initialData: cachedOrder || undefined,
+    queryFn: async () => offlineStorage.syncOrderFromServer(orderId),
   });
 
   useEffect(() => {
@@ -479,13 +500,43 @@ export default function CustomerPage() {
   });
 
   const serviceRequestMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/orders/${orderId}/service`),
+    mutationFn: async () => {
+      try {
+        return await apiRequest("POST", `/api/orders/${orderId}/service`);
+      } catch (error) {
+        if (!navigator.onLine) {
+          await offlineStorage.addToOutbox(`/api/orders/${orderId}/service`, "POST");
+          throw new Error("offline");
+        }
+        throw error;
+      }
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] }),
+    onError: (error: any) => {
+      if (error.message === "offline") {
+        toast({ title: "Offline", description: "Service request queued — will send when online" });
+      }
+    }
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: (text: string) => apiRequest("POST", `/api/orders/${orderId}/customer-message`, { message: text }),
+    mutationFn: async (text: string) => {
+      try {
+        return await apiRequest("POST", `/api/orders/${orderId}/customer-message`, { message: text });
+      } catch (error) {
+        if (!navigator.onLine) {
+          await offlineStorage.addToOutbox(`/api/orders/${orderId}/customer-message`, "POST", { message: text });
+          throw new Error("offline");
+        }
+        throw error;
+      }
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] }),
+    onError: (error: any) => {
+      if (error.message === "offline") {
+        toast({ title: "Offline", description: "Message queued — will send when online" });
+      }
+    }
   });
 
   useEffect(() => {
@@ -500,8 +551,14 @@ export default function CustomerPage() {
   const isSetupComplete = pushEnabled && audioUnlocked;
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-4">
+    <div className="min-h-screen bg-background flex flex-col">
+      {!isOnline && (
+        <div className="bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-900 px-4 py-2 text-center text-sm text-amber-900 dark:text-amber-100">
+          You are offline. Some features may be limited.
+        </div>
+      )}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-4">
 
         {/* Header */}
         <div className="text-center space-y-1">
@@ -575,7 +632,7 @@ export default function CustomerPage() {
             <span>{isMuted ? "Muted" : "Sound On"}</span>
           </button>
         </div>
-
+        </div>
       </div>
     </div>
   );

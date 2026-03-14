@@ -1,10 +1,11 @@
 import type { Order, Message, Offer } from "@shared/schema";
 
 const DB_NAME = 'restaurant_buzzer_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ORDERS_STORE = 'orders';
 const MESSAGES_STORE = 'messages';
 const METADATA_STORE = 'metadata';
+const OUTBOX_STORE = 'outbox';
 
 let dbInstance: IDBDatabase | null = null;
 let dbInitPromise: Promise<IDBDatabase> | null = null;
@@ -48,6 +49,10 @@ async function openDatabase(): Promise<IDBDatabase> {
         
         if (!db.objectStoreNames.contains(METADATA_STORE)) {
           db.createObjectStore(METADATA_STORE, { keyPath: 'key' });
+        }
+
+        if (!db.objectStoreNames.contains(OUTBOX_STORE)) {
+          db.createObjectStore(OUTBOX_STORE, { keyPath: 'id', autoIncrement: true });
         }
         
         console.log('[IndexedDB] Database schema created');
@@ -242,6 +247,106 @@ export async function clearAllData(): Promise<void> {
   }
 }
 
+export async function syncOrderFromServer(orderId: string): Promise<Order | null> {
+  try {
+    const response = await fetch(`/api/orders/${orderId}`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const order = await response.json() as Order;
+    await saveOrder(order);
+    console.log('[OfflineFirst] Synced order from server:', orderId);
+    return order;
+  } catch (error) {
+    console.warn('[OfflineFirst] Network fetch failed, using cached order:', error);
+    const cached = await getOrder(orderId);
+    return cached;
+  }
+}
+
+export async function isStale(orderId: string): Promise<boolean> {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([METADATA_STORE], 'readonly');
+    const store = transaction.objectStore(METADATA_STORE);
+    
+    return new Promise((resolve) => {
+      const request = store.get('lastWrite');
+      request.onsuccess = () => {
+        const data = request.result;
+        if (!data) {
+          resolve(true);
+          return;
+        }
+        const lastWrite = new Date(data.timestamp).getTime();
+        const now = new Date().getTime();
+        resolve(now - lastWrite > 30000); // 30 seconds
+      };
+      request.onerror = () => resolve(true);
+    });
+  } catch {
+    return true;
+  }
+}
+
+export async function addToOutbox(url: string, method: string, body?: any): Promise<void> {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([OUTBOX_STORE], 'readwrite');
+    const store = transaction.objectStore(OUTBOX_STORE);
+    
+    store.add({
+      url,
+      method,
+      body,
+      createdAt: new Date().toISOString()
+    });
+    console.log('[Outbox] Action queued:', method, url);
+  } catch (error) {
+    console.warn('[Outbox] Failed to queue action:', error);
+  }
+}
+
+export async function syncOutbox(): Promise<void> {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([OUTBOX_STORE], 'readonly');
+    const store = transaction.objectStore(OUTBOX_STORE);
+    
+    return new Promise((resolve) => {
+      const request = store.getAll();
+      request.onsuccess = async () => {
+        const entries = request.result;
+        console.log('[Outbox] Syncing', entries.length, 'queued actions');
+        
+        for (const entry of entries) {
+          try {
+            const response = await fetch(entry.url, {
+              method: entry.method,
+              headers: entry.body ? { 'Content-Type': 'application/json' } : {},
+              body: entry.body ? JSON.stringify(entry.body) : undefined,
+              credentials: 'include'
+            });
+            
+            if (response.ok) {
+              // Delete successful entry
+              const deleteTransaction = db.transaction([OUTBOX_STORE], 'readwrite');
+              deleteTransaction.objectStore(OUTBOX_STORE).delete(entry.id);
+              console.log('[Outbox] Synced:', entry.method, entry.url);
+            } else {
+              console.warn('[Outbox] Failed to sync:', entry.method, entry.url, response.status);
+            }
+          } catch (error) {
+            console.warn('[Outbox] Error syncing entry:', error);
+          }
+        }
+        resolve();
+      };
+      request.onerror = () => resolve();
+    });
+  } catch (error) {
+    console.warn('[Outbox] Sync failed:', error);
+  }
+}
+
 export const offlineStorage = {
   isAvailable: isIndexedDBAvailable,
   checkEviction: checkDataEviction,
@@ -250,5 +355,9 @@ export const offlineStorage = {
   deleteOrder,
   saveMessage,
   getMessages,
-  clearAll: clearAllData
+  clearAll: clearAllData,
+  syncOrderFromServer,
+  isStale,
+  addToOutbox,
+  syncOutbox
 };
