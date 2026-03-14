@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
+import { sanitizeInput } from "./lib/sanitize";
 import { requireAuth } from "./middleware/auth";
 import bcrypt from "bcryptjs";
 
@@ -694,7 +695,8 @@ export async function registerRoutes(
 
   app.post("/api/orders/:id/trigger", requireAuth, async (req, res) => {
     try {
-      const { message } = req.body || {};
+      const rawMessage = req.body?.message;
+      const message = rawMessage ? sanitizeInput(String(rawMessage)) : undefined;
       await sendNotification(req.params.id, message);
       res.json({ success: true });
     } catch (error) {
@@ -709,7 +711,8 @@ export async function registerRoutes(
         message: z.string().min(1).max(200)
       });
       
-      const { message } = messageSchema.parse(req.body);
+      const parsed = messageSchema.parse(req.body);
+      const message = sanitizeInput(parsed.message);
       
       const order = await storage.getOrder(req.params.id);
       if (!order) {
@@ -745,7 +748,8 @@ export async function registerRoutes(
         message: z.string().min(1).max(200)
       });
       
-      const { message } = messageSchema.parse(req.body);
+      const parsed = messageSchema.parse(req.body);
+      const message = sanitizeInput(parsed.message);
       
       const order = await storage.getOrder(req.params.id);
       if (!order) {
@@ -822,7 +826,9 @@ export async function registerRoutes(
         description: z.string().min(1)
       });
       
-      const { title, description } = offerSchema.parse(req.body);
+      const parsed = offerSchema.parse(req.body);
+      const title = sanitizeInput(parsed.title);
+      const description = sanitizeInput(parsed.description);
       
       const order = await storage.addOffer(req.params.id, title, description);
       if (!order) {
@@ -895,7 +901,8 @@ export async function registerRoutes(
         notes: z.string().max(500)
       });
       
-      const { notes } = notesSchema.parse(req.body);
+      const parsed = notesSchema.parse(req.body);
+      const notes = sanitizeInput(parsed.notes);
       
       const order = await storage.updateOrderNotes(req.params.id, notes);
       if (!order) {

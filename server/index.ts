@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import helmet from "helmet";
 import { validateEnvironment } from "./env-validation";
 import { registerRoutes } from "./routes";
 import { runMigrations, closeDb, getPool } from "./db";
@@ -17,6 +18,35 @@ const httpServer = createServer(app);
 // Must be first — required for correct IP detection and secure cookie detection
 // behind Replit's reverse proxy.
 app.set("trust proxy", 1);
+
+// Security headers — applied before all other middleware
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        connectSrc: [
+          "'self'",
+          "wss:",
+          "ws:",
+          "https://fcm.googleapis.com",
+          "https://updates.push.services.mozilla.com",
+          "https://push.services.mozilla.com",
+        ],
+        workerSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
+    // X-Content-Type-Options: nosniff (default on)
+    // X-Frame-Options: SAMEORIGIN by default — override to DENY
+    frameguard: { action: "deny" },
+    // Referrer-Policy: strict-origin-when-cross-origin (default on)
+  })
+);
 
 declare module "http" {
   interface IncomingMessage {

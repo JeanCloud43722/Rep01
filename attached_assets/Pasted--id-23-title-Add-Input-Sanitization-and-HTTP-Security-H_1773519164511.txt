@@ -1,0 +1,28 @@
+{
+  "id": 23,
+  "title": "Add Input Sanitization and HTTP Security Headers via Helmet",
+  "priority": "P1-High",
+  "depends_on": [],
+  "context": "Messages and notes are length-checked by Zod but not sanitized for HTML/XSS. No HTTP security headers are set.",
+  "task": "Add server-side input sanitization, client-side HTML escaping verification, and HTTP security headers.",
+  "detailed_instructions": [
+    "Install helmet for HTTP security headers.",
+    "In server/index.ts, add helmet middleware BEFORE all other middleware:",
+    "app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: [\"'self'\"], scriptSrc: [\"'self'\", \"'unsafe-inline'\"], styleSrc: [\"'self'\", \"'unsafe-inline'\"], connectSrc: [\"'self'\", 'wss:', 'ws:', 'https://fcm.googleapis.com', 'https://updates.push.services.mozilla.com'], imgSrc: [\"'self'\", '', 'blob:'] } } }));",
+    "NOTE: The CSP must allow WebSocket connections (wss:, ws:) and push service endpoints (FCM, Mozilla). Adjust if push notifications break.",
+    "Create server/lib/sanitize.ts with sanitizeInput(input: string): string function:",
+    "- Strip HTML tags: input.replace(/<[^>]*>/g, '')",
+    "- Escape remaining special characters: & -> &amp;, < -> &lt;, > -> &gt;, \" -> &quot;, ' -> &#x27;",
+    "- Trim whitespace",
+    "- Return sanitized string",
+    "Apply sanitizeInput() to all user-provided text before storage:",
+    "- In POST /api/orders/:id/message and /customer-message: sanitize the message text",
+    "- In POST /api/orders/:id/trigger: sanitize the optional message",
+    "- In PATCH /api/orders/:id/notes: sanitize the notes text",
+    "- In POST /api/orders/:id/offers: sanitize title and description",
+    "CLIENT-SIDE: Verify that React's JSX rendering ({variable} in JSX) automatically escapes HTML — it does. Do NOT use dangerouslySetInnerHTML anywhere. Search codebase for 'dangerouslySetInnerHTML' and remove if found.",
+    "Helmet adds X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Referrer-Policy: strict-origin-when-cross-origin by default."
+  ],
+  "replit_note": "Test that CSP doesn't break WebSocket connections or push notifications. Adjust CSP directives if needed. Helmet's defaults are secure but may need tuning for specific features.",
+  "testing_checkpoint": "Send a message containing '<script>alert(1)</script>' — stored as escaped text, rendered as literal text (not executed). Check response headers for X-Content-Type-Options, X-Frame-Options, CSP. WebSocket and push still work."
+}
