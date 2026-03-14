@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 import { queryClient, apiRequest, getQueryFn } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
 import { offlineStorage } from "@/lib/indexed-db-storage";
@@ -25,6 +27,7 @@ import {
   Volume2,
   VolumeX,
   MessageSquare,
+  Globe,
 } from "lucide-react";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -38,38 +41,49 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return out;
 }
 
-function formatTime(isoString: string) {
-  return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function formatTime(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return new Intl.DateTimeFormat('en-US', { 
+      hour: "2-digit", 
+      minute: "2-digit",
+      timeZone: tz
+    }).format(date);
+  } catch {
+    return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
 }
 
-function formatRelativeTime(isoString: string): string {
+function formatRelativeTime(isoString: string, t: any): string {
   const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return formatTime(isoString);
+  if (diff < 60) return t('time.just_now');
+  if (diff < 3600) return t('time.min_ago', { minutes: Math.floor(diff / 60) });
+  if (diff < 86400) return t('time.hour_ago', { hours: Math.floor(diff / 3600) });
+  return t('time.day_ago', { days: Math.floor(diff / 86400) });
 }
 
 function formatRemainingTime(scheduledTime: string): string {
   const diff = new Date(scheduledTime).getTime() - Date.now();
-  if (diff <= 0) return "Should be ready now!";
+  if (diff <= 0) return "Ready now!";
   const h = Math.floor(diff / 3600000);
   const m = Math.floor((diff % 3600000) / 60000);
   const s = Math.floor((diff % 60000) / 1000);
   return h > 0 ? `${h}h ${m}m ${s}s remaining` : `${m}m ${s}s remaining`;
 }
 
-function getStatusConfig(status: Order["status"]) {
+function getStatusConfig(status: Order["status"], t: any) {
   switch (status) {
     case "waiting":
     case "subscribed":
-      return { icon: Clock, title: "Order Registered", description: "We're preparing your order. You'll be alerted when it's ready!", color: "text-primary" };
+      return { icon: Clock, title: t('status.waiting.title'), description: t('status.waiting.description'), color: "text-primary" };
     case "scheduled":
-      return { icon: Calendar, title: "Order In Progress", description: "Your order is being prepared. You'll be alerted soon!", color: "text-primary" };
+      return { icon: Calendar, title: t('status.scheduled.title'), description: t('status.scheduled.description'), color: "text-primary" };
     case "notified":
     case "completed":
-      return { icon: CheckCircle2, title: "Order Ready!", description: "Your order is ready for pickup", color: "text-green-600 dark:text-green-500" };
+      return { icon: CheckCircle2, title: t('status.notified.title'), description: t('status.notified.description'), color: "text-green-600 dark:text-green-500" };
     default:
-      return { icon: AlertCircle, title: "Unknown Status", description: "Please contact staff for assistance", color: "text-muted-foreground" };
+      return { icon: AlertCircle, title: t('status.unknown.title'), description: t('status.unknown.description'), color: "text-muted-foreground" };
   }
 }
 
@@ -80,7 +94,8 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
   onRequestService: () => void;
   isRequestingService: boolean;
 }) {
-  const config = getStatusConfig(order.status);
+  const { t } = useTranslation();
+  const config = getStatusConfig(order.status, t);
   const StatusIcon = config.icon;
   const [remaining, setRemaining] = useState("");
 
@@ -110,12 +125,12 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
                 <Clock className="h-4 w-4" />
                 <span>{remaining}</span>
               </div>
-              <p className="text-xs text-muted-foreground">Ready at {formatTime(order.scheduledTime)}</p>
+              <p className="text-xs text-muted-foreground">{t('card.ready_at')} {formatTime(order.scheduledTime)}</p>
             </div>
           )}
           <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-500">
             <Check className="h-4 w-4" />
-            <span>This page updates automatically</span>
+            <span>{t('card.auto_update')}</span>
           </div>
           <Button
             variant="destructive"
@@ -126,9 +141,9 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
             aria-describedby="waiter-help"
           >
             {isRequestingService ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <AlertCircle className="h-5 w-5 mr-2" />}
-            {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
+            {isRequestingService ? t('card.calling') : t('card.call_waiter')}
           </Button>
-          <p id="waiter-help" className="text-xs text-muted-foreground">Staff will come to your table</p>
+          <p id="waiter-help" className="text-xs text-muted-foreground">{t('card.waiter_help')}</p>
         </div>
       </CardContent>
     </Card>
@@ -140,6 +155,7 @@ function MessageThread({ order, onSend, isSending }: {
   onSend: (text: string) => void;
   isSending: boolean;
 }) {
+  const { t } = useTranslation();
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -159,7 +175,7 @@ function MessageThread({ order, onSend, isSending }: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm flex items-center gap-2">
           <MessageSquare className="h-4 w-4" />
-          Chat with Staff
+          {t('chat.title')}
           {order.messages.length > 0 && (
             <Badge variant="secondary" className="ml-auto text-xs">
               {order.messages.length}
@@ -170,7 +186,7 @@ function MessageThread({ order, onSend, isSending }: {
       <CardContent className="space-y-3" aria-live="polite" aria-label="Message thread">
         {order.messages.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
-            No messages yet. Send a message to the staff below.
+            {t('chat.no_messages')}
           </p>
         ) : (
           <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
@@ -185,7 +201,7 @@ function MessageThread({ order, onSend, isSending }: {
                   }`}>
                     <p className="break-words">{msg.text}</p>
                     <p className={`text-xs mt-1 ${isCustomer ? "text-primary-foreground/70 text-right" : "text-muted-foreground"}`}>
-                      {isCustomer ? "You" : "Staff"} · {formatRelativeTime(msg.sentAt)}
+                      {isCustomer ? t('chat.you') : t('chat.staff')} · {formatRelativeTime(msg.sentAt, t)}
                     </p>
                   </div>
                 </div>
@@ -197,14 +213,14 @@ function MessageThread({ order, onSend, isSending }: {
         <div className="flex gap-2 pt-1">
           <Input
             type="text"
-            placeholder="Type a message..."
+            placeholder={t('chat.placeholder')}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
             disabled={isSending}
             maxLength={200}
             className="flex-1"
-            aria-label="Message input"
+            aria-label={t('chat.send_btn')}
           />
           <Button
             size="icon"
@@ -221,6 +237,7 @@ function MessageThread({ order, onSend, isSending }: {
 }
 
 function OrderNotFound() {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="max-w-md w-full">
@@ -230,8 +247,8 @@ function OrderNotFound() {
               <AlertCircle className="h-8 w-8 text-destructive" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-lg font-semibold">Order Not Found</h3>
-              <p className="text-sm text-muted-foreground">This order link is invalid or has expired. Please contact the restaurant staff.</p>
+              <h3 className="text-lg font-semibold">{t('order.notFound')}</h3>
+              <p className="text-sm text-muted-foreground">{t('order.notFound_desc')}</p>
             </div>
           </div>
         </CardContent>
@@ -258,6 +275,7 @@ function LoadingState() {
 // ─── main page ───────────────────────────────────────────────────────────────
 
 export default function CustomerPage() {
+  const { t, i18n } = useTranslation();
   const { toast } = useToast();
   const params = useParams<{ id: string }>();
   const orderId = params.id;
@@ -533,7 +551,7 @@ export default function CustomerPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] }),
     onError: (error: any) => {
       if (error.message === "offline") {
-        toast({ title: "Offline", description: "Service request queued — will send when online" });
+        toast({ title: t('toast.offline_title'), description: t('toast.offline_service') });
       }
     }
   });
@@ -553,7 +571,7 @@ export default function CustomerPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] }),
     onError: (error: any) => {
       if (error.message === "offline") {
-        toast({ title: "Offline", description: "Message queued — will send when online" });
+        toast({ title: t('toast.offline_title'), description: t('toast.offline_message') });
       }
     }
   });
@@ -573,7 +591,7 @@ export default function CustomerPage() {
     <div className="min-h-screen bg-background flex flex-col">
       {!isOnline && (
         <div className="bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-900 px-4 py-2 text-center text-sm text-amber-900 dark:text-amber-100">
-          You are offline. Some features may be limited.
+          {t('offline.banner')}
         </div>
       )}
       <main role="main" aria-label="Order Status" id="main-content" className="flex-1 flex items-center justify-center p-4">
@@ -584,8 +602,30 @@ export default function CustomerPage() {
           <Badge variant="outline" className="font-mono text-sm px-3 py-1">
             Order #{formatOrderId(order.id)}
           </Badge>
-          <h1 className="text-3xl font-bold tracking-tight">Digital Buzzer</h1>
-          <p className="text-sm text-muted-foreground">We'll notify you the moment your order is ready.</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('order.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('order.subtitle')}</p>
+        </div>
+
+        {/* Language toggle button */}
+        <div className="flex justify-center gap-1">
+          <Button
+            variant={i18n.language === 'en' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => i18n.changeLanguage('en')}
+            className="gap-1"
+          >
+            <Globe className="h-3 w-3" />
+            EN
+          </Button>
+          <Button
+            variant={i18n.language === 'de' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => i18n.changeLanguage('de')}
+            className="gap-1"
+          >
+            <Globe className="h-3 w-3" />
+            DE
+          </Button>
         </div>
 
         {/* Notification setup prompt */}
@@ -596,11 +636,11 @@ export default function CustomerPage() {
                 <Bell className="h-5 w-5 text-primary" />
               </div>
               <div className="space-y-1">
-                <p className="font-semibold text-sm">Enable Notifications</p>
-                <p className="text-xs text-muted-foreground">Tap to activate sound and push alerts.</p>
+                <p className="font-semibold text-sm">{t('order.header')}</p>
+                <p className="text-xs text-muted-foreground">{t('order.header_subtitle')}</p>
               </div>
               <Button onClick={autoEnable} className="w-full" size="lg">
-                Enable Notifications
+                {t('order.enable_btn')}
               </Button>
             </CardContent>
           </Card>
@@ -626,7 +666,7 @@ export default function CustomerPage() {
             <div className="flex items-center gap-1">
               <Bell className={`h-3 w-3 ${pushEnabled ? "text-green-600" : "text-muted-foreground"}`} />
               <span className={pushEnabled ? "text-green-600" : "text-muted-foreground"}>
-                {pushEnabled ? "Push On" : "Push Off"}
+                {pushEnabled ? t('status.push_on') : t('status.push_off')}
               </span>
             </div>
             <div className="flex items-center gap-1">
@@ -634,7 +674,7 @@ export default function CustomerPage() {
                 ? <Volume2 className="h-3 w-3 text-green-600" />
                 : <VolumeX className="h-3 w-3 text-amber-600" />}
               <span className={audioUnlocked ? "text-green-600" : "text-amber-600"}>
-                {audioUnlocked ? "Audio Ready" : "Tap to Enable"}
+                {audioUnlocked ? t('status.audio_ready') : t('status.tap_enable')}
               </span>
             </div>
           </div>
@@ -645,11 +685,11 @@ export default function CustomerPage() {
                 ? "bg-muted text-muted-foreground"
                 : "bg-primary/10 text-primary"
             }`}
-            aria-label={isMuted ? "Unmute sounds" : "Mute sounds"}
+            aria-label={isMuted ? t('status.unmute') : t('status.mute')}
             aria-pressed={isMuted}
           >
             {isMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
-            <span>{isMuted ? "Muted" : "Sound On"}</span>
+            <span>{isMuted ? t('status.muted') : t('status.sound_on')}</span>
           </button>
         </div>
         </div>

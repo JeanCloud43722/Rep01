@@ -1,0 +1,22 @@
+{
+  "id": 21,
+  "title": "Add i18n Support with English and German, Local Timezone for Countdowns",
+  "priority": "P2-Medium",
+  "depends_on": [],
+  "context": "The app is currently English-only. For restaurants with international customers, multi-language support improves accessibility. Countdown timers must show local time.",
+  "task": "Add i18n support with English and German as initial languages, and ensure scheduled countdowns display in customer's local timezone.",
+  "detailed_instructions": [
+    "Install react-i18next and i18next.",
+    "Create client/src/lib/i18n.ts: initialize i18next with inline translation resources (no separate JSON files — simpler for Replit).",
+    "Configure: fallbackLng: 'en', detection: { order: ['localStorage', 'navigator'], caches: ['localStorage'] }, interpolation: { escapeValue: false }.",
+    "Define English and German translations for all customer-facing strings: status titles, descriptions, button labels, toast messages, time formatting ('just now', 'N min ago').",
+    "Import i18n config in client/src/main.tsx at the top: import './lib/i18n';",
+    "In customer.tsx: import { useTranslation } from 'react-i18next'; const { t } = useTranslation(); Replace all hardcoded strings with t('key').",
+    "Add language toggle button in customer page header: Globe icon + 'EN' / 'DE' text. On click: i18n.changeLanguage(lng). Persist via localStorage (handled by detector plugin).",
+    "For countdown timer: detect timezone with Intl.DateTimeFormat().resolvedOptions().timeZone. Use toLocaleTimeString with user's timezone for display. Keep all server-side times in UTC/ISO 8601.",
+    "Admin page: optionally add i18n (lower priority since staff is usually same language). At minimum, add the language switcher.",
+    "Push notification content stays in English for now — i18n for push requires server-side language tracking per order."
+  ],
+  "replit_note": "Inline translation resources keep the setup simple and avoid file-loading issues in Replit. Can migrate to separate JSON files later if more languages are added.",
+  "testing_checkpoint": "Customer page: toggle EN/DE — all labels switch language. Refresh — language choice persisted. Countdown timer shows correct local time."
+}
