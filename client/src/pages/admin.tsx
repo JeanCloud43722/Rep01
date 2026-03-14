@@ -854,6 +854,9 @@ export default function AdminPage() {
     };
   }, [enableAudio]);
   
+  // ── AudioContext lifecycle cleanup ──
+  useEffect(() => { return () => audioManager.cleanup(); }, []);
+
   // Admin WebSocket — real-time alerts via reusable hook
   const { connectionStatus } = useAdminWebSocket((eventType, orderId) => {
     playStaffSound(eventType as "service_request" | "new_registration" | "order_completed" | "message");

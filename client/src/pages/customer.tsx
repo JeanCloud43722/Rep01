@@ -259,6 +259,8 @@ export default function CustomerPage() {
   // ── audio / push state ──
   const [audioUnlocked, setAudioUnlocked] = useState(() => audioManager.isUnlocked);
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("customer_muted") === "true");
+  const isMutedRef = useRef(isMuted);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   const [pushEnabled, setPushEnabled] = useState(() => typeof window !== "undefined" && Notification.permission === "granted");
 
   // ── connection state ──
@@ -277,32 +279,17 @@ export default function CustomerPage() {
     });
   }, []);
 
-  // ── 800Hz buzzer (order ready) ──
+  // ── order-ready sound (double sine chime via AudioManager) ──
   const playBuzzer = useCallback(() => {
-    if (isMuted) return;
-    try {
-      const ctx = audioManager.getContext();
-      if (!ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.setValueAtTime(800, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.8);
-    } catch (e) {
-      console.warn("[Audio] Buzzer failed:", e);
-    }
-  }, [isMuted]);
+    if (isMutedRef.current) return;
+    audioManager.play("order-ready");
+  }, []);
 
   // ── message chime (staff message) ──
   const playMessageChime = useCallback(() => {
-    if (isMuted) return;
+    if (isMutedRef.current) return;
     audioManager.playIfUnlocked("message");
-  }, [isMuted]);
+  }, []);
 
   // ── push subscription ──
   const subscribeToPushSilent = useCallback(async () => {
@@ -332,7 +319,7 @@ export default function CustomerPage() {
       const ok = await audioManager.unlock();
       if (ok) {
         setAudioUnlocked(true);
-        if (!isMuted) playBuzzer();
+        if (!isMutedRef.current) playBuzzer();
       }
     } catch (e) {
       console.warn("[AutoEnable] Audio:", e);
@@ -346,7 +333,7 @@ export default function CustomerPage() {
         console.warn("[AutoEnable] Push:", e);
       }
     }
-  }, [orderId, isMuted, playBuzzer, subscribeToPushSilent]);
+  }, [orderId, playBuzzer, subscribeToPushSilent]);
 
   useEffect(() => {
     const handle = () => {
@@ -397,6 +384,9 @@ export default function CustomerPage() {
   }, [orderId, pushEnabled, subscribeToPushSilent]);
 
   useEffect(() => audioManager.onUnlockChange(setAudioUnlocked), []);
+
+  // ── AudioContext lifecycle cleanup ──
+  useEffect(() => { return () => audioManager.cleanup(); }, []);
 
   useEffect(() => {
     const handleVisible = async () => {

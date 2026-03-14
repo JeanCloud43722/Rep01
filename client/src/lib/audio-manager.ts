@@ -333,6 +333,13 @@ class AudioManager {
   playWithDelay(cue: SoundCue, delayMs: number): void {
     setTimeout(() => this.play(cue), delayMs);
   }
+
+  cleanup(): void {
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
+    }
+  }
 }
 
 export const audioManager = AudioManager.getInstance();
