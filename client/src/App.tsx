@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -5,20 +6,24 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { IOSInstallPrompt } from "@/components/ios-install-prompt";
 import { ScreenReaderAnnounce } from "@/components/sr-announce";
-import NotFound from "@/pages/not-found";
-import AdminPage from "@/pages/admin";
-import CustomerPage from "@/pages/customer";
-import LoginPage from "@/pages/login";
+import { PageLoader } from "@/components/page-loader";
+
+const AdminPage = lazy(() => import("@/pages/admin"));
+const CustomerPage = lazy(() => import("@/pages/customer"));
+const LoginPage = lazy(() => import("@/pages/login"));
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 function Router() {
   return (
-    <Switch>
-      <Route path="/login" component={LoginPage} />
-      <Route path="/" component={AdminPage} />
-      <Route path="/admin" component={AdminPage} />
-      <Route path="/order/:id" component={CustomerPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<PageLoader />}>
+      <Switch>
+        <Route path="/login" component={LoginPage} />
+        <Route path="/" component={AdminPage} />
+        <Route path="/admin" component={AdminPage} />
+        <Route path="/order/:id" component={CustomerPage} />
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 
