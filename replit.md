@@ -80,6 +80,22 @@ MVP complete with all core features:
 npm run dev  # Start development server on port 5000
 ```
 
+## Testing
+Vitest-based test suite covering critical server-side paths (40 tests).
+
+```bash
+npx vitest run           # Run all tests once
+npx vitest               # Watch mode
+```
+
+Test files in `server/__tests__/`:
+- `state-machine.test.ts` — pure unit tests for order status transitions
+- `orders.test.ts` — API tests: create/read/delete orders, register endpoint
+- `auth.test.ts` — login success/failure, session auth, public vs protected routes
+- `messages.test.ts` — staff and customer messages, input validation
+
+Test helpers in `server/test-helper.ts`: `createTestApp()` / `createLoggedInAgent()` / `closeTestServer()`
+
 ## Recent Changes
 - Initial MVP implementation with all core features
 - QR code generation using qrcode library
