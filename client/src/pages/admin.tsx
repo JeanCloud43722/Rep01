@@ -95,7 +95,8 @@ function OrderCard({
   onDelete,
   onAddOffer,
   onEditNotes,
-  onSendMessage
+  onSendMessage,
+  onComplete
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
@@ -105,6 +106,7 @@ function OrderCard({
   onAddOffer: (orderId: string) => void;
   onEditNotes: (orderId: string) => void;
   onSendMessage: (orderId: string) => void;
+  onComplete: (orderId: string) => void;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   
@@ -215,6 +217,19 @@ function OrderCard({
                 Schedule
               </Button>
             </>
+          )}
+
+          {order.status === "notified" && (
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              onClick={() => onComplete(order.id)}
+              className="bg-green-600 hover:bg-green-700 text-white"
+              data-testid={`button-complete-${order.id}`}
+            >
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              Mark Complete
+            </Button>
           )}
           
           <Button 
@@ -936,6 +951,24 @@ export default function AdminPage() {
       });
     }
   });
+
+  const completeOrderMutation = useMutation({
+    mutationFn: (orderId: string) => apiRequest("POST", `/api/orders/${orderId}/complete`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({
+        title: "Order completed",
+        description: "Order has been marked as complete"
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to complete order",
+        variant: "destructive"
+      });
+    }
+  });
   
   const triggerMutation = useMutation({
     mutationFn: ({ orderId, message }: { orderId: string; message: string }) => 
@@ -1169,6 +1202,7 @@ export default function AdminPage() {
                     onAddOffer={setOfferOrderId}
                     onEditNotes={setNotesOrderId}
                     onSendMessage={setMessageOrderId}
+                    onComplete={(id) => completeOrderMutation.mutate(id)}
                   />
                 ))}
               </div>
@@ -1193,6 +1227,7 @@ export default function AdminPage() {
                     onAddOffer={setOfferOrderId}
                     onEditNotes={setNotesOrderId}
                     onSendMessage={setMessageOrderId}
+                    onComplete={(id) => completeOrderMutation.mutate(id)}
                   />
                 ))}
               </div>

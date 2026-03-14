@@ -834,6 +834,36 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/:id/complete", requireAuth, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      
+      // Cancel any pending scheduled notification job
+      const job = scheduledJobs.get(orderId);
+      if (job) {
+        job.cancel();
+        scheduledJobs.delete(orderId);
+        logger.info("Cancelled scheduled job for completed order", { source: "api", orderId });
+      }
+      
+      // Mark order as completed
+      const order = await storage.updateOrderStatus(orderId, "completed");
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Notify both customer and admin of completion
+      notifyOrderUpdate(orderId, "order_completed");
+      notifyAdminUpdate(orderId, "order_completed");
+      
+      logger.info("Order marked as completed", { source: "api", orderId });
+      res.json(order);
+    } catch (error) {
+      logger.error("Failed to complete order", { source: "api", orderId: req.params.id, error });
+      res.status(500).json({ error: "Failed to complete order" });
+    }
+  });
+
   app.patch("/api/orders/:id/notes", requireAuth, async (req, res) => {
     try {
       const notesSchema = z.object({
