@@ -1,0 +1,23 @@
+{
+  "id": 20,
+  "title": "Add Comprehensive Accessibility Improvements",
+  "priority": "P2-Medium",
+  "depends_on": [],
+  "context": "While prefers-reduced-motion is checked, comprehensive A11y improvements are needed for WCAG compliance.",
+  "task": "Add ARIA attributes, keyboard navigation support, screen reader announcements, and visual alternatives for audio cues.",
+  "detailed_instructions": [
+    "ARIA landmarks: In admin.tsx, wrap main content in <main role='main' aria-label='Order Management Dashboard'>. In customer.tsx, wrap in <main role='main' aria-label='Order Status'>.",
+    "Live regions: Add aria-live='polite' to StatusCard component in customer.tsx so screen readers announce status changes. Add aria-live='polite' to message thread container.",
+    "Create client/src/components/sr-announce.tsx: visually hidden div with aria-live='assertive' for important announcements. Use Tailwind class 'sr-only' (absolute w-px h-px overflow-hidden).",
+    "Use sr-announce in: customer.tsx when status changes to 'notified' ('Your order is ready for pickup'), when new message arrives ('New message from staff'), admin.tsx when service request comes in ('Service request for order N').",
+    "Keyboard navigation: Verify all buttons are <button> elements (not <div onClick>). Add keyboard shortcut in admin.tsx: press 'N' to open New Order dialog (useEffect keydown listener, only when no modal is open and no input focused).",
+    "Button ARIA: Mute toggle should use aria-pressed={isMuted}. Call Waiter should have aria-describedby pointing to helper text.",
+    "Form labels: Every <Input> must have an associated <Label htmlFor> or aria-label. Add labels to all modal inputs.",
+    "Skip to content: In App.tsx, add as first element: <a href='#main-content' className='sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded'>Skip to main content</a>. Add id='main-content' to <main> in both pages.",
+    "Focus styles: Add to global CSS: *:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }",
+    "Visual alternative for audio: When order_ready event fires, add animate-pulse class to StatusCard for 3 seconds as visual indicator for hearing-impaired users.",
+    "Color contrast: Verify all status badge text meets WCAG AA (4.5:1 ratio). Check with browser devtools color contrast checker."
+  ],
+  "replit_note": "Test with browser built-in screen reader (ChromeVox extension or macOS VoiceOver). Use Lighthouse accessibility audit in DevTools for scoring.",
+  "testing_checkpoint": "Tab through all interactive elements — all focusable with visible focus ring. Screen reader announces status changes. Visual pulse appears on order_ready. Lighthouse A11y score > 90."
+}

@@ -94,7 +94,7 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
   const isReady = order.status === "notified" || order.status === "completed";
 
   return (
-    <Card>
+    <Card aria-live="polite" aria-atomic="true">
       <CardContent className="pt-6">
         <div className="flex flex-col items-center text-center space-y-5">
           <div className={`w-20 h-20 rounded-full flex items-center justify-center ${isReady ? "bg-green-100 dark:bg-green-900/30" : "bg-primary/10"}`}>
@@ -123,10 +123,12 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
             onClick={onRequestService}
             disabled={isRequestingService}
             className="w-full max-w-xs"
+            aria-describedby="waiter-help"
           >
             {isRequestingService ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <AlertCircle className="h-5 w-5 mr-2" />}
             {isRequestingService ? "Calling Waiter..." : "Call Waiter"}
           </Button>
+          <p id="waiter-help" className="text-xs text-muted-foreground">Staff will come to your table</p>
         </div>
       </CardContent>
     </Card>
@@ -165,7 +167,7 @@ function MessageThread({ order, onSend, isSending }: {
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3" aria-live="polite" aria-label="Message thread">
         {order.messages.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">
             No messages yet. Send a message to the staff below.
@@ -202,6 +204,7 @@ function MessageThread({ order, onSend, isSending }: {
             disabled={isSending}
             maxLength={200}
             className="flex-1"
+            aria-label="Message input"
           />
           <Button
             size="icon"
@@ -444,6 +447,22 @@ export default function CustomerPage() {
     console.log(`[Customer Poll] ${pollInterval}ms (WS: ${wsConnected})`);
   }, [pollInterval, wsConnected]);
 
+  // Screen reader announcements
+  useEffect(() => {
+    if (order?.status === "notified" && typeof window !== "undefined" && (window as any).announceToScreenReader) {
+      (window as any).announceToScreenReader("Your order is ready for pickup");
+    }
+  }, [order?.status]);
+
+  useEffect(() => {
+    if (order && order.messages.length > 0 && typeof window !== "undefined" && (window as any).announceToScreenReader) {
+      const lastMsg = order.messages[order.messages.length - 1];
+      if (lastMsg.sender === "staff") {
+        (window as any).announceToScreenReader("New message from staff");
+      }
+    }
+  }, [order?.messages.length]);
+
   useEffect(() => {
     if (order && orderId) offlineStorage.saveOrder(order).catch(console.warn);
   }, [order, orderId]);
@@ -557,7 +576,7 @@ export default function CustomerPage() {
           You are offline. Some features may be limited.
         </div>
       )}
-      <div className="flex-1 flex items-center justify-center p-4">
+      <main role="main" aria-label="Order Status" id="main-content" className="flex-1 flex items-center justify-center p-4">
         <div className="max-w-md w-full space-y-4">
 
         {/* Header */}
@@ -627,13 +646,14 @@ export default function CustomerPage() {
                 : "bg-primary/10 text-primary"
             }`}
             aria-label={isMuted ? "Unmute sounds" : "Mute sounds"}
+            aria-pressed={isMuted}
           >
             {isMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
             <span>{isMuted ? "Muted" : "Sound On"}</span>
           </button>
         </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

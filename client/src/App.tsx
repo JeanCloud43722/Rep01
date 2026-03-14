@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { IOSInstallPrompt } from "@/components/ios-install-prompt";
+import { ScreenReaderAnnounce } from "@/components/sr-announce";
 import NotFound from "@/pages/not-found";
 import AdminPage from "@/pages/admin";
 import CustomerPage from "@/pages/customer";
@@ -25,9 +26,16 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        <a 
+          href="#main-content" 
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded"
+        >
+          Skip to main content
+        </a>
         <Toaster />
         <Router />
         <IOSInstallPrompt />
+        <ScreenReaderAnnounce />
       </TooltipProvider>
     </QueryClientProvider>
   );

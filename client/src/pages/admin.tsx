@@ -787,10 +787,6 @@ export default function AdminPage() {
     },
   });
 
-  useEffect(() => {
-    if (!meLoading && meError) navigate("/login");
-  }, [meLoading, meError, navigate]);
-
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [notifyOrderId, setNotifyOrderId] = useState<string | null>(null);
   const [messageOrderId, setMessageOrderId] = useState<string | null>(null);
@@ -828,6 +824,21 @@ export default function AdminPage() {
         break;
     }
   }, []);
+
+  // Keyboard shortcut: N for new order
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "n" || e.key === "N") {
+        const target = e.target as HTMLElement;
+        if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && !selectedOrder && !notifyOrderId && !messageOrderId && !scheduleOrderId && !offerOrderId && !notesOrderId) {
+          e.preventDefault();
+          handleCreateOrder();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedOrder, notifyOrderId, messageOrderId, scheduleOrderId, offerOrderId, notesOrderId]);
   
   const showEventToast = useCallback((eventType: string, orderId: string) => {
     if (eventType === "service_request") {
@@ -1187,7 +1198,7 @@ export default function AdminPage() {
         </div>
       </header>
       
-      <main className="container px-4 py-8 mx-auto max-w-6xl">
+      <main role="main" aria-label="Order Management Dashboard" id="main-content" className="container px-4 py-8 mx-auto max-w-6xl">
         <Tabs defaultValue="active" className="space-y-6">
           <TabsList>
             <TabsTrigger value="active" data-testid="tab-active-orders">
