@@ -76,7 +76,8 @@ Bidirectional message between staff and customer. The `sender` field enables cha
 ```
 {
   id: string,
-  requestedAt: string      // ISO 8601 timestamp
+  requestedAt: string,     // ISO 8601 timestamp
+  acknowledgedAt: string | null  // ISO 8601 timestamp; null until staff acknowledges
 }
 ```
 
@@ -145,6 +146,8 @@ All methods return `Promise`-wrapped values.
 | `addOffer(id, title, description)` | `id: string, title: string, description: string` | `Promise<Order \| undefined>` | Appends an `Offer` object with generated ID and current timestamp |
 | `addServiceRequest(id)` | `id: string` | `Promise<Order \| undefined>` | Appends a `ServiceRequest` object with generated ID and current timestamp |
 | `updateOrderNotes(id, notes)` | `id: string, notes: string` | `Promise<Order \| undefined>` | Overwrites the `notes` string field |
+| `acknowledgeServiceRequest(orderId, requestId)` | `orderId: string, requestId: string` | `Promise<Order \| undefined>` | Stamps `acknowledgedAt` on the matching service request |
+| `deleteCompletedOrdersOlderThan(hours)` | `hours: number` | `Promise<number>` | Deletes completed orders older than `hours`; returns count deleted |
 
 ### `MemStorage` Class
 
@@ -159,6 +162,8 @@ Implements `IStorage` using an in-memory `Map<string, Order>`.
 
 **Exported Singleton:** `export const storage = new MemStorage();`
 
+**`reset()` Method (test use only):** Clears the internal `Map`, removing all orders. Called in `server/test-setup.ts` via `beforeEach` to isolate tests.
+
 ---
 
 ## 3. Server Entry Point
@@ -167,22 +172,34 @@ Implements `IStorage` using an in-memory `Map<string, Order>`.
 
 ### Bootstrap Sequence
 
-1. Create Express app and Node.js HTTP server (`createServer(app)`)
-2. Register JSON body parser with raw body capture middleware (stores `req.rawBody` for signature verification)
-3. Register URL-encoded body parser
-4. Register request logging middleware:
-   - Captures response JSON via `res.json()` override
-   - Logs `METHOD PATH STATUS in DURATIONms :: BODY` for all `/api/` routes
-5. Call `registerRoutes(httpServer, app)` to set up API routes and WebSocket servers
-6. Register global error handler (status + message JSON response)
-7. Conditional static serving:
-   - **Production** (`NODE_ENV === "production"`): `serveStatic(app)` from `server/static.ts`
-   - **Development**: `setupVite(httpServer, app)` from `server/vite.ts` (Vite dev middleware)
-8. Bind to port from `PORT` env var (default `5000`), host `0.0.0.0`, with `reusePort: true`
+1. Call `validateEnvironment()` — reads and validates all env vars; exits process on failure
+2. Run `runMigrations()` — applies pending Drizzle schema migrations to PostgreSQL
+3. Configure VAPID keys — calls `getVapidKeys()` in `server/routes.ts`; warns if ephemeral
+4. Restore scheduled notifications — re-creates `node-schedule` jobs for orders still in `"scheduled"` state
+5. Create Express app + set `trust proxy 1` (required behind Replit's reverse proxy for secure cookies)
+6. Apply Helmet security headers — CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`
+7. Register JSON body parser with raw body capture middleware (stores `req.rawBody` on `IncomingMessage`)
+8. Register URL-encoded body parser
+9. Register request logging middleware — logs method, path, status, duration, IP via Winston
+10. Call `registerRoutes(httpServer, app)` to set up all API routes and WebSocket servers
+11. Register global error handler — returns `{ message }` JSON with status from error or 500
+12. Conditional static serving:
+    - **Production** (`NODE_ENV === "production"`): `serveStatic(app)` from `server/static.ts`
+    - **Development**: `setupVite(httpServer, app)` from `server/vite.ts` (Vite dev middleware)
+13. Bind to `PORT` (default `5000`), host `0.0.0.0`, `reusePort: true`
 
-### Exported Utility
+### Winston Logging
 
-`log(message: string, source = "express")` - Formatted console logger with `HH:MM:SS AM/PM [source] message` format.
+**File:** `server/lib/logger.ts`
+
+- **Development format:** colorized `level [source] message {meta}` for human readability
+- **Production format:** structured JSON — every log entry includes `timestamp`, `level`, `message`, and all metadata fields
+- **Sensitive field sanitization:** keys matching `password`, `token`, `secret`, `auth`, `key`, `credential` are replaced with `"[REDACTED]"` before logging
+- **Log levels:** controlled by `LOG_LEVEL` env var (default `info`); valid values: `debug`, `info`, `warn`, `error`
+
+### Session Storage
+
+PostgreSQL-backed via `connect-pg-simple`. Session store pruned every 15 minutes (`pruneSessionInterval: 900`). Sessions expire after 7 days (`maxAge: 7 * 24 * 60 * 60 * 1000`). Cookies set `httpOnly: true`, `sameSite: "strict"`, and `secure: true` in production.
 
 ---
 
@@ -194,22 +211,29 @@ All endpoints are prefixed with `/api/`. Request bodies are validated with Zod s
 
 ### Endpoint Summary
 
-| Method | Path | Request Body | Success Response | Status Codes | WS Notifications |
-|--------|------|-------------|------------------|-------------|-------------------|
-| GET | `/api/vapid-public-key` | none | `{ publicKey: string }` | 200 | none |
-| GET | `/api/orders` | none | `Order[]` | 200, 500 | none |
-| GET | `/api/orders/:id` | none | `Order` | 200, 404, 500 | none |
-| POST | `/api/orders` | none | `Order` | 201, 500 | none |
-| DELETE | `/api/orders/:id` | none | empty | 204, 404, 500 | none |
-| POST | `/api/orders/:id/register` | none | `Order` | 200, 404, 500 | `notifyAdminUpdate(id, "new_registration")` |
-| POST | `/api/orders/:id/subscribe` | `{ subscription: PushSubscriptionData }` | `Order` | 200, 400, 404, 500 | `notifyAdminUpdate(id, "status_update")` |
-| POST | `/api/orders/:id/trigger` | `{ message?: string }` | `{ success: true }` | 200, 500 | `notifyOrderUpdate(id, "order_ready")` + `notifyAdminUpdate(id, "order_ready")` |
-| POST | `/api/orders/:id/message` | `{ message: string }` | `{ success: true }` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "message")` + `notifyAdminUpdate(id, "message")` |
-| POST | `/api/orders/:id/customer-message` | `{ message: string }` | `{ success: true }` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "message")` + `notifyAdminUpdate(id, "message")` |
-| POST | `/api/orders/:id/schedule` | `{ scheduledTime: string, message?: string }` | `Order` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "status_update")` + `notifyAdminUpdate(id, "status_update")` |
-| POST | `/api/orders/:id/offers` | `{ title: string, description: string }` | `Order` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "offer")` + `notifyAdminUpdate(id, "offer")` |
-| POST | `/api/orders/:id/service` | none | `Order` | 200, 404, 500 | `notifyOrderUpdate(id, "service_request")` + `notifyAdminUpdate(id, "service_request")` |
-| PATCH | `/api/orders/:id/notes` | `{ notes: string }` | `Order` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "status_update")` + `notifyAdminUpdate(id, "status_update")` |
+| Method | Path | Auth | Request Body | Success Response | Status Codes | WS Notifications |
+|--------|------|------|-------------|------------------|-------------|-------------------|
+| GET | `/api/health` | Public | none | `{ status, db }` | 200, 503 | none |
+| POST | `/api/auth/login` | — | `{ username, password }` | `{ authenticated, username }` | 200, 400, 401, 500 | none |
+| POST | `/api/auth/logout` | — | none | `{ success }` | 200 | none |
+| GET | `/api/auth/me` | — | none | `{ authenticated, username? }` | 200 | none |
+| GET | `/api/vapid-public-key` | Public | none | `{ publicKey: string }` | 200 | none |
+| GET | `/api/orders` | Admin | none | `Order[]` | 200, 401, 500 | none |
+| GET | `/api/orders/:id` | Public | none | `Order` | 200, 404, 500 | none |
+| POST | `/api/orders` | Admin | none | `Order` | 201, 401, 500 | none |
+| DELETE | `/api/orders/:id` | Admin | none | empty | 204, 401, 404, 500 | none |
+| POST | `/api/orders/:id/register` | Public | none | `Order` | 200, 404, 500 | `notifyAdminUpdate(id, "new_registration")` |
+| POST | `/api/orders/:id/subscribe` | Public | `{ subscription: PushSubscriptionData }` | `Order` | 200, 400, 404, 500 | `notifyAdminUpdate(id, "status_update")` |
+| POST | `/api/orders/:id/trigger` | Admin | `{ message?: string }` | `{ success: true }` | 200, 400, 401, 500 | `notifyOrderUpdate(id, "order_ready")` + `notifyAdminUpdate(id, "order_ready")` |
+| POST | `/api/orders/:id/message` | Admin | `{ message: string }` | `{ success: true }` | 200, 400, 401, 404, 500 | `notifyOrderUpdate(id, "message")` + `notifyAdminUpdate(id, "message")` |
+| POST | `/api/orders/:id/customer-message` | Public | `{ message: string }` | `{ success: true }` | 200, 400, 404, 500 | `notifyOrderUpdate(id, "message")` + `notifyAdminUpdate(id, "message")` |
+| POST | `/api/orders/:id/complete` | Admin | none | `Order` | 200, 400, 401, 404, 500 | `notifyOrderUpdate(id, "order_completed")` + `notifyAdminUpdate(id, "order_completed")` |
+| POST | `/api/orders/:id/schedule` | Admin | `{ scheduledTime: string, message?: string }` | `Order` | 200, 400, 401, 404, 500 | `notifyOrderUpdate(id, "status_update")` + `notifyAdminUpdate(id, "status_update")` |
+| POST | `/api/orders/:id/offers` | Admin | `{ title: string, description: string }` | `Order` | 200, 400, 401, 404, 500 | `notifyOrderUpdate(id, "offer")` + `notifyAdminUpdate(id, "offer")` |
+| POST | `/api/orders/:id/service` | Public | none | `Order` | 200, 404, 500 | `notifyOrderUpdate(id, "service_request")` + `notifyAdminUpdate(id, "service_request")` |
+| POST | `/api/orders/:id/service/:requestId/acknowledge` | Admin | none | `Order` | 200, 400, 401, 404, 500 | `notifyOrderUpdate(id, "status_update")` + `notifyAdminUpdate(id, "status_update")` |
+| PATCH | `/api/orders/:id/notes` | Admin | `{ notes: string }` | `Order` | 200, 400, 401, 404, 500 | `notifyOrderUpdate(id, "status_update")` + `notifyAdminUpdate(id, "status_update")` |
+| POST | `/api/orders/cleanup` | Admin | `{ maxAgeHours?: number }` | `{ deletedCount }` | 200, 400, 401, 500 | none |
 
 ### Per-Endpoint Details
 
@@ -1095,12 +1119,18 @@ Handles `{ type: "SKIP_WAITING" }` message by calling `self.skipWaiting()`.
 
 ### Environment Variables
 
+Validated at startup by `server/env-validation.ts`. Server exits with a descriptive error if a required variable is missing.
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `VAPID_PUBLIC_KEY` | No | ephemeral (generated) | Web Push VAPID public key. Must be persistent for subscriptions to survive restarts. |
-| `VAPID_PRIVATE_KEY` | No | ephemeral (generated) | Web Push VAPID private key. Must match the public key. |
-| `PORT` | No | `5000` | HTTP server port. Only this port is not firewalled on Replit. |
-| `NODE_ENV` | No | (none) | Set to `"production"` to use static file serving instead of Vite dev server. |
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string. Process exits on startup if absent. |
+| `SESSION_SECRET` | Recommended | Random 32-byte hex (ephemeral) | Signs `express-session` cookies. Without it, all sessions are invalidated on restart. |
+| `VAPID_PUBLIC_KEY` | Recommended | Ephemeral (generated) | Web Push VAPID public key. Changing this invalidates all existing push subscriptions. |
+| `VAPID_PRIVATE_KEY` | Recommended | Ephemeral (generated) | Paired with `VAPID_PUBLIC_KEY`. Must be set together. |
+| `ALLOWED_ORIGIN` | Optional | `*.replit.app,*.repl.co` | Comma-separated allowed origins for CORS and CSP `connect-src`. |
+| `NODE_ENV` | Optional | Unset | `development` or `production`. Controls cookie security and log format. |
+| `PORT` | Optional | `5000` | HTTP server port. |
+| `LOG_LEVEL` | Optional | `info` | Winston log level: `debug`, `info`, `warn`, or `error`. |
 
 ### Vite Configuration
 
@@ -1159,12 +1189,39 @@ apiRequest(method: string, url: string, data?: unknown): Promise<Response>
 
 ### State Machine
 
+**File:** `server/lib/state-machine.ts`
+
 ```
 waiting  -->  subscribed  -->  scheduled  -->  notified  -->  completed
    |              |                               ^
    |              +-------------------------------+
    |              (direct notify without scheduling)
+   |
+   +---------------------------------------------------->  notified
+   (waiting → notified: direct notify on unclaimed order)
 ```
+
+**`VALID_TRANSITIONS` map:**
+```typescript
+{
+  waiting:    ["subscribed", "notified"],
+  subscribed: ["scheduled", "notified"],
+  scheduled:  ["notified"],
+  notified:   ["completed"],
+  completed:  []
+}
+```
+
+**`isValidTransition(from, to): boolean`** — pure function, no side effects.
+
+**`assertValidTransition(from, to): void`** — throws `ValidationError` if the transition is invalid.
+
+**`ValidationError`** extends `Error` with `status: 400`. The message format is:
+```
+Invalid transition: {from} → {to}. Allowed: {allowedStates.join(", ")}
+```
+
+Route handlers catch `ValidationError` and return `{ error: message }` with HTTP 400. This prevents the state machine from being bypassed via direct API calls.
 
 ### Transition Table
 
@@ -1173,8 +1230,8 @@ waiting  -->  subscribed  -->  scheduled  -->  notified  -->  completed
 | `waiting` | `subscribed` | Customer visits order page | `POST /api/orders/:id/register` | `notifyAdminUpdate("new_registration")` |
 | `waiting`/`subscribed` | `subscribed` | Customer enables push | `POST /api/orders/:id/subscribe` | `notifyAdminUpdate("status_update")` |
 | `subscribed` | `scheduled` | Staff schedules notification | `POST /api/orders/:id/schedule` | `notifyOrderUpdate("status_update")` + `notifyAdminUpdate("status_update")` |
-| any | `notified` | Staff triggers notification (or scheduled job fires) | `POST /api/orders/:id/trigger` / scheduled job | `notifyOrderUpdate("order_ready")` + `notifyAdminUpdate("order_ready")` |
-| any | `completed` | (Not currently exposed via endpoint - would need `updateOrderStatus` call) | - | - |
+| `waiting`/`subscribed`/`scheduled` | `notified` | Staff triggers notification or scheduled job fires | `POST /api/orders/:id/trigger` / scheduled job | `notifyOrderUpdate("order_ready")` + `notifyAdminUpdate("order_ready")` |
+| `notified` | `completed` | Staff marks order complete | `POST /api/orders/:id/complete` | `notifyOrderUpdate("order_completed")` + `notifyAdminUpdate("order_completed")` |
 
 ### Customer UI Per Status
 
@@ -1214,52 +1271,74 @@ Note: `waiting` and `subscribed` share the same config. `notified` and `complete
 
 ## 16. Known Optimization Opportunities
 
-### Data Persistence
-**Issue:** In-memory `Map<string, Order>` storage loses all data on server restart.
-**Impact:** All orders, messages, subscriptions, and scheduled jobs are lost.
-**Migration Path:** Replace `MemStorage` with a PostgreSQL-backed implementation of `IStorage`. The interface is already abstracted for this purpose.
+Items marked ✅ have been completed. Remaining items represent potential future work.
 
-### Push Notification Retry Pattern
-**Issue:** 3 push notifications are sent at 0s, 2s, 4s intervals via fire-and-forget `setTimeout`. Each attempt re-reads the order from storage.
-**Impact:** May produce duplicate notifications on the client side if earlier attempts succeed. No deduplication beyond the service worker's `tag: "order-notification"` mechanism.
-**Suggestion:** Track push delivery status per attempt and skip subsequent attempts on confirmed delivery.
+### ✅ Data Persistence — PostgreSQL Migration
+**Completed.** `admin_users` and `user_sessions` tables are now stored in PostgreSQL via Drizzle ORM + Neon serverless. Orders are still stored in `MemStorage` (in-memory) for demo purposes — see TRACKING.md for the migration path.
 
-### Polling Fallback
-**Issue:** Both `admin.tsx` and `customer.tsx` poll via `refetchInterval: 2000` as a safety net alongside WebSocket.
-**Impact:** Unnecessary network traffic when WebSocket is healthy. 2-second polling interval generates ~30 requests/minute per connected client.
-**Suggestion:** Increase interval to 10-15 seconds or disable polling entirely when WebSocket is confirmed connected, re-enabling only on disconnect.
+### ✅ Admin Authentication
+**Completed.** Session-based authentication via `express-session` + `connect-pg-simple`. `requireAuth` middleware protects all admin endpoints. Passwords hashed with bcrypt cost factor 12. Login: `POST /api/auth/login`.
 
-### VAPID Key Ephemeral Risk
-**Issue:** If `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` environment variables are not set, the server generates ephemeral keys at startup.
-**Impact:** Any push subscriptions created with ephemeral keys become invalid after server restart. Clients receive errors and must re-subscribe.
-**Fix:** Always set persistent VAPID keys as environment variables.
+### ✅ Input Sanitization
+**Completed.** All user-supplied text (messages, notes, offer title/description) passes through `server/lib/sanitize.ts` before storage.
 
-### No Authentication/Authorization
-**Issue:** All admin endpoints are publicly accessible. No login, session, or API key required.
-**Impact:** Anyone who discovers the admin URL can create/delete orders, send notifications, etc.
-**Suggestion:** Add authentication middleware (e.g., HTTP Basic Auth, JWT, or session-based login) for admin routes.
+### ✅ Structured Logging
+**Completed.** `server/lib/logger.ts` provides Winston-based logging with JSON output in production, colorized output in dev, sensitive-field redaction, and configurable log level via `LOG_LEVEL` env var.
 
-### No Message Pagination
-**Issue:** The full `messages[]` array is always returned inline with the order object. No pagination or cursor-based loading.
-**Impact:** As conversations grow, response sizes increase linearly. A busy order with hundreds of messages will have large payloads.
-**Suggestion:** Add a separate `/api/orders/:id/messages?limit=N&offset=M` endpoint for paginated message retrieval.
+### ✅ Env Var Validation
+**Completed.** `server/env-validation.ts` validates all required and optional env vars at startup; process exits with a descriptive error on failure.
+
+### ✅ Security Headers
+**Completed.** Helmet middleware applied at server startup with strict CSP, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`.
+
+### ✅ Order State Machine
+**Completed.** `server/lib/state-machine.ts` enforces valid transitions. `assertValidTransition()` throws `ValidationError` (HTTP 400) on invalid transitions. All mutating route handlers call `assertValidTransition` before modifying state.
+
+### ✅ Service Request Acknowledgment
+**Completed.** `POST /api/orders/:id/service/:requestId/acknowledge` stamps `acknowledgedAt` on the request. Customer UI shows "Staff notified" status in real time.
+
+### ✅ Auto-Cleanup
+**Completed.** Hourly interval deletes completed orders older than 24 hours. Manual trigger available via `POST /api/orders/cleanup`.
+
+### ✅ Session Table Pruning
+**Completed.** `connect-pg-simple` prunes expired sessions every 15 minutes (`pruneSessionInterval: 900`).
+
+### ✅ Vitest Test Suite
+**Completed.** 40 tests across 4 suites covering state machine, auth, orders, and messages. Run with `npx vitest run`.
+
+---
+
+### Push Notification Retry — No Confirmed Delivery
+**Issue:** 3 push notifications are sent at 0s, 2s, 4s via fire-and-forget `setTimeout`. No delivery confirmation.
+**Impact:** May produce duplicate notifications if earlier attempts succeed. Deduplication relies solely on SW `tag: "order-notification"`.
+**Suggestion:** Track push attempt success and skip subsequent attempts on confirmed delivery.
+
+### Polling Fallback Frequency
+**Issue:** Both `admin.tsx` and `customer.tsx` poll via `refetchInterval: 2000` as a WebSocket safety net.
+**Impact:** ~30 requests/minute per client even when WebSocket is healthy.
+**Suggestion:** Increase to 10–15 seconds, or disable when WebSocket is confirmed connected.
+
+### Rate Limiting
+**Issue:** No rate limiting is implemented on any endpoint.
+**Impact:** High-frequency endpoints (`/service`, `/customer-message`) could be abused.
+**Suggestion:** Add `express-rate-limit` in front of public-facing write endpoints.
+
+### `clientSessions` Map Unbounded Growth
+**Issue:** The `clientSessions` Map stores session data for every client that has ever connected.
+**Impact:** Memory leak proportional to total unique clients.
+**Suggestion:** Evict entries with `lastSeen` older than 1 hour via a cleanup interval.
 
 ### Service Worker Cache Version
 **Issue:** `CACHE_NAME = 'restaurant-buzzer-v3'` must be manually bumped in `sw.js` on each deploy.
-**Impact:** Forgetting to bump the version means clients may serve stale cached assets.
-**Suggestion:** Inject the cache version at build time from a git hash or build timestamp.
-
-### `clientSessions` Map Unbounded Growth
-**Issue:** The `clientSessions` Map in `server/routes.ts` stores session data for every client that has ever connected. Sessions are never cleaned up.
-**Impact:** Memory leak proportional to total unique clients over server lifetime.
-**Suggestion:** Add a TTL-based cleanup interval (e.g., evict sessions with `lastSeen` older than 1 hour).
-
-### `scheduledJobs` Map Persistence
-**Issue:** Scheduled `node-schedule` jobs are stored in an in-memory Map. `restoreScheduledNotifications()` re-creates them on startup, but depends on orders being in storage (which is also in-memory).
-**Impact:** After restart, no scheduled jobs exist because the underlying orders are also lost.
-**Fix:** Resolves naturally when storage is migrated to PostgreSQL.
+**Impact:** Stale cached assets served to clients if version not bumped.
+**Suggestion:** Inject cache version from git hash or build timestamp at build time.
 
 ### WebSocket Connection Limits
-**Issue:** No limit on the number of simultaneous WebSocket connections per order or globally.
-**Impact:** A malicious client could open many connections and exhaust server resources.
+**Issue:** No limit on simultaneous WebSocket connections per order or globally.
+**Impact:** A malicious client could exhaust server resources.
 **Suggestion:** Add per-IP or per-order connection limits.
+
+### Order Storage — Full PostgreSQL Migration
+**Issue:** `MemStorage` loses all orders, messages, subscriptions on restart.
+**Impact:** All active orders are lost if the server restarts.
+**Migration Path:** Implement `DbStorage` (a PostgreSQL-backed `IStorage`) using the existing Drizzle setup. The interface is already fully abstracted — no route changes required.

@@ -9,6 +9,7 @@ Customers scan a QR code to subscribe for alerts. Staff send instant or schedule
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
+- [Security](#security)
 - [Environment Variables](#environment-variables)
 - [Development](#development)
 - [Testing](#testing)
@@ -58,6 +59,39 @@ Customers scan a QR code to subscribe for alerts. Staff send instant or schedule
 | `shared/schema.ts` | Zod schemas and Drizzle table definitions shared by client and server |
 
 For a deeper explanation of each module, see [`replit.md`](./replit.md).
+
+---
+
+## Security
+
+### HTTP Headers — Helmet
+
+All responses include a strict set of HTTP security headers via the `helmet` package:
+
+| Header | Value |
+|--------|-------|
+| `Content-Security-Policy` | `default-src 'self'`; scripts/styles `'unsafe-inline'` for Vite; `connectSrc` allows WebSocket and push service endpoints |
+| `X-Frame-Options` | `DENY` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+
+### Input Sanitization
+
+All user-supplied text fields (messages, notes, offer titles/descriptions) are passed through `server/lib/sanitize.ts` before being stored or broadcast. HTML tags and script injection patterns are stripped server-side.
+
+### Authentication
+
+Admin routes are protected by `requireAuth` middleware (`server/middleware/auth.ts`). Authentication is session-based using `express-session` backed by PostgreSQL via `connect-pg-simple`. Passwords are hashed with bcrypt (cost factor 12).
+
+Public routes (customer order status, push subscribe, service request, customer messages) do not require authentication.
+
+### CORS / Allowed Origins
+
+`ALLOWED_ORIGIN` env var controls which origins are trusted for CORS and CSP. Defaults to `*.replit.app,*.repl.co`. Set to your exact production domain before deploying.
+
+### Known Gaps
+
+Rate limiting is **not currently implemented**. If you need protection against abuse, consider adding `express-rate-limit` in front of high-frequency endpoints (`/api/orders/:id/service`, `/api/orders/:id/customer-message`).
 
 ---
 
@@ -192,7 +226,6 @@ After your first successful deployment:
 
 - **Uptime monitoring** — Set up an external monitor to `GET /api/health` every 5 minutes. The endpoint checks database connectivity and reports `{ status: "ok", db: { connected: true, responseTimeMs: N } }`.
 - **Error logs** — Watch for `logger.error` entries. Database failures and push delivery errors are always logged at ERROR level.
-- **Rate limiting** — Spam-test endpoints to confirm 429 responses are returned after the rate-limit threshold.
 - **Auto-cleanup** — Every hour the server removes completed orders older than 24 hours. Confirm with log entries matching `Auto-cleanup: removed completed orders`.
 - **Session table size** — `pruneSessionInterval` is set to 900 seconds (15 min). Verify the `user_sessions` table stays small in the Replit Database panel.
 - **Database size** — Monitor in the Replit Database panel. Should stay well under 1 GB with hourly cleanup active.
@@ -203,22 +236,33 @@ After your first successful deployment:
 
 See [`replit.md`](./replit.md#api-endpoints) for the full endpoint table.
 
-### Key Endpoints
+### Full Endpoint Table
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/health` | Public | Database health check |
-| `POST` | `/api/auth/login` | — | Admin login |
-| `GET` | `/api/orders` | Admin | List all orders |
-| `POST` | `/api/orders` | Admin | Create new order |
-| `GET` | `/api/orders/:id` | Public | Customer order status |
-| `POST` | `/api/orders/:id/register` | Public | Auto-register customer visit |
-| `POST` | `/api/orders/:id/trigger` | Admin | Send immediate notification |
-| `POST` | `/api/orders/:id/schedule` | Admin | Schedule future notification |
+| `GET` | `/api/health` | Public | Database connectivity check — returns `{ status, db }` |
+| `POST` | `/api/auth/login` | — | Admin login; sets `connect.sid` session cookie |
+| `POST` | `/api/auth/logout` | — | Destroys session |
+| `GET` | `/api/auth/me` | — | Returns `{ authenticated, username }` |
+| `GET` | `/api/vapid-public-key` | Public | Returns VAPID public key for push subscription setup |
+| `GET` | `/api/orders` | **Admin** | List all orders (newest first) |
+| `POST` | `/api/orders` | **Admin** | Create new order; returns `Order` with status `waiting` |
+| `DELETE` | `/api/orders/:id` | **Admin** | Delete order; cancels any pending scheduled job |
+| `GET` | `/api/orders/:id` | Public | Fetch single order by ID |
+| `POST` | `/api/orders/:id/register` | Public | Auto-register customer visit; `waiting → subscribed` |
+| `POST` | `/api/orders/:id/subscribe` | Public | Save push subscription; body: `{ subscription }` |
+| `POST` | `/api/orders/:id/trigger` | **Admin** | Send immediate notification; fires 3 push attempts |
+| `POST` | `/api/orders/:id/schedule` | **Admin** | Schedule future notification; body: `{ scheduledTime, message? }` |
+| `POST` | `/api/orders/:id/message` | **Admin** | Send staff message to customer |
+| `POST` | `/api/orders/:id/customer-message` | Public | Send customer message to staff |
+| `POST` | `/api/orders/:id/complete` | **Admin** | Mark order as completed; `notified → completed` |
+| `POST` | `/api/orders/:id/offers` | **Admin** | Add offer; body: `{ title, description }` |
 | `POST` | `/api/orders/:id/service` | Public | Customer calls waiter |
-| `POST` | `/api/orders/:id/service/:reqId/acknowledge` | Admin | Staff acknowledges service request |
-| `WS` | `/ws/orders?id=:id` | Public | Real-time customer updates |
-| `WS` | `/ws/admin` | Admin | Real-time admin dashboard updates |
+| `POST` | `/api/orders/:id/service/:requestId/acknowledge` | **Admin** | Staff acknowledges a service request |
+| `PATCH` | `/api/orders/:id/notes` | **Admin** | Update order notes; body: `{ notes }` (max 500 chars) |
+| `POST` | `/api/orders/cleanup` | **Admin** | Manually trigger cleanup of old completed orders |
+| `WS` | `/ws/orders?id=:id` | Public | Real-time customer updates for a specific order |
+| `WS` | `/ws/admin` | **Admin** | Real-time admin dashboard updates for all orders |
 
 ---
 
