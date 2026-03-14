@@ -4,6 +4,7 @@ import { useParams } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
 import { offlineStorage } from "@/lib/indexed-db-storage";
+import { createWebSocketManager } from "@/lib/websocket-manager";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -260,6 +261,9 @@ export default function CustomerPage() {
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("customer_muted") === "true");
   const [pushEnabled, setPushEnabled] = useState(() => typeof window !== "undefined" && Notification.permission === "granted");
 
+  // ── connection state ──
+  const [wsConnected, setWsConnected] = useState(false);
+
   // ── order data ──
   const [hasRegistered, setHasRegistered] = useState(false);
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
@@ -427,66 +431,26 @@ export default function CustomerPage() {
     if (order && orderId) offlineStorage.saveOrder(order).catch(console.warn);
   }, [order, orderId]);
 
-  // ── WebSocket (T002) ──
+  // ── WebSocket via WebSocketManager ──
   useEffect(() => {
     if (!orderId) return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws/orders?id=${orderId}`;
-    let ws: WebSocket | null = null;
-    let attempts = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    const MAX = 10;
-
-    const connect = () => {
-      try {
-        ws = new WebSocket(url);
-        ws.onopen = () => { attempts = 0; console.log("[Customer WS] Connected"); };
-        ws.onmessage = (evt) => {
-          try {
-            const msg = JSON.parse(evt.data);
-            if (msg.type === "ping") { ws?.send(JSON.stringify({ type: "pong", timestamp: Date.now() })); return; }
-            if (msg.type === "order_updated") {
-              if (msg.eventType === "order_ready") {
-                playBuzzer();
-              } else if (msg.eventType === "message") {
-                playMessageChime();
-              }
-              queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-            }
-          } catch {}
-        };
-        ws.onclose = () => {
-          if (attempts < MAX) {
-            const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-            attempts++;
-            reconnectTimer = setTimeout(connect, delay);
-          }
-        };
-        ws.onerror = () => ws?.close();
-      } catch (e) {
-        if (attempts < MAX) {
-          const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-          attempts++;
-          reconnectTimer = setTimeout(connect, delay);
+    const wsManager = createWebSocketManager({
+      url: `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/orders?id=${orderId}`,
+      orderId,
+      onMessage: (msg) => {
+        if (msg.type === "order_updated") {
+          if (msg.eventType === "order_ready") playBuzzer();
+          else if (msg.eventType === "message") playMessageChime();
+          queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+        } else if (msg.type === "sync_response" && msg.order) {
+          queryClient.setQueryData(["/api/orders", orderId], msg.order);
         }
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible" && (!ws || ws.readyState !== WebSocket.OPEN)) {
-        attempts = 0;
-        connect();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibility);
-    connect();
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
-    };
+      },
+      onConnect: () => setWsConnected(true),
+      onDisconnect: () => setWsConnected(false),
+      onReconnecting: (attempt) => console.log(`[Customer WS] Reconnecting attempt ${attempt}`),
+    });
+    return () => wsManager.close();
   }, [orderId, playBuzzer, playMessageChime]);
 
   // ── Service Worker messages ──
