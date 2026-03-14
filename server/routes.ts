@@ -538,11 +538,37 @@ export async function registerRoutes(
     res.json({ publicKey: vapidKeys.publicKey });
   });
 
+  const ordersQuerySchema = z.object({
+    status: z.string().optional(),
+    limit: z.coerce.number().min(1).max(100).default(50),
+    offset: z.coerce.number().min(0).default(0),
+  });
+
   app.get("/api/orders", requireAuth, async (req, res) => {
+    let query: { status?: string; limit: number; offset: number };
     try {
-      const orders = await storage.getAllOrders();
-      res.json(orders);
+      query = ordersQuerySchema.parse(req.query);
     } catch (error) {
+      res.status(400).json({ error: "Invalid query parameters", details: String(error) });
+      return;
+    }
+    try {
+      const statuses = query.status
+        ? query.status.split(",").map(s => s.trim()).filter(Boolean)
+        : undefined;
+      const { orders, total } = await storage.getOrdersPaginated({
+        statuses,
+        limit: query.limit,
+        offset: query.offset,
+      });
+      const result = orders.map(order => ({
+        ...order,
+        totalMessages: order.messages.length,
+        messages: order.messages.slice(-20),
+      }));
+      res.json({ orders: result, total, limit: query.limit, offset: query.offset });
+    } catch (error) {
+      logger.error("Failed to fetch orders", { error });
       res.status(500).json({ error: "Failed to fetch orders" });
     }
   });

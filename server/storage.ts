@@ -7,6 +7,7 @@ function generateShortId(): string {
 
 export interface IStorage {
   getAllOrders(): Promise<Order[]>;
+  getOrdersPaginated(options: { statuses?: string[]; limit: number; offset: number }): Promise<{ orders: Order[]; total: number }>;
   getOrder(id: string): Promise<Order | undefined>;
   createOrder(): Promise<Order>;
   deleteOrder(id: string): Promise<boolean>;
@@ -31,6 +32,16 @@ export class MemStorage implements IStorage {
     return Array.from(this.orders.values()).sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+  }
+
+  async getOrdersPaginated({ statuses, limit, offset }: { statuses?: string[]; limit: number; offset: number }): Promise<{ orders: Order[]; total: number }> {
+    let all = Array.from(this.orders.values()).sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    if (statuses && statuses.length > 0) {
+      all = all.filter(o => statuses.includes(o.status));
+    }
+    return { orders: all.slice(offset, offset + limit), total: all.length };
   }
 
   async getOrder(id: string): Promise<Order | undefined> {

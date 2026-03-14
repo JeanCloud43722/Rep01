@@ -39,6 +39,11 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 
+type OrderWithMeta = Order & { totalMessages: number };
+type PaginatedOrdersResponse = { orders: OrderWithMeta[]; total: number; limit: number; offset: number };
+
+const ACTIVE_STATUSES = "waiting,subscribed,scheduled,notified";
+
 function getStatusBadgeVariant(status: Order["status"]): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "waiting":
@@ -866,12 +871,31 @@ export default function AdminPage() {
     queryClient.refetchQueries({ queryKey: ["/api/orders"] });
   });
 
-  // ── query — polling slows down when WebSocket is healthy ──
+  // ── queries — server-side filtered + paginated; polling rate adapts to WS health ──
   const pollInterval = connectionStatus === "connected" ? 15000 : 3000;
-  const { data: orders, isLoading, refetch } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
+
+  const activeQuery = useQuery<PaginatedOrdersResponse>({
+    queryKey: ["/api/orders", "active"],
+    queryFn: async () => {
+      const res = await fetch(`/api/orders?status=${ACTIVE_STATUSES}&limit=50&offset=0`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+      return res.json();
+    },
     refetchInterval: pollInterval,
   });
+
+  const completedQuery = useQuery<PaginatedOrdersResponse>({
+    queryKey: ["/api/orders", "completed"],
+    queryFn: async () => {
+      const res = await fetch(`/api/orders?status=completed&limit=50&offset=0`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+      return res.json();
+    },
+    refetchInterval: pollInterval,
+  });
+
+  const isLoading = activeQuery.isLoading;
+  const refetch = () => { activeQuery.refetch(); completedQuery.refetch(); };
 
   useEffect(() => {
     console.log(`[Admin Poll] ${pollInterval}ms (WS: ${connectionStatus})`);
@@ -1025,8 +1049,8 @@ export default function AdminPage() {
     updateNotesMutation.mutate({ orderId, notes });
   };
   
-  const activeOrders = orders?.filter(o => o.status !== "completed") ?? [];
-  const completedOrders = orders?.filter(o => o.status === "completed") ?? [];
+  const activeOrders = activeQuery.data?.orders ?? [];
+  const completedOrders = completedQuery.data?.orders ?? [];
 
   if (meLoading) {
     return (
@@ -1216,7 +1240,7 @@ export default function AdminPage() {
         open={!!notesOrderId}
         onClose={() => setNotesOrderId(null)}
         onSaveNotes={handleSaveNotes}
-        initialNotes={orders?.find(o => o.id === notesOrderId)?.notes || ""}
+        initialNotes={[...activeOrders, ...completedOrders].find(o => o.id === notesOrderId)?.notes || ""}
       />
     </div>
   );
