@@ -6,6 +6,7 @@ import schedule from "node-schedule";
 import { pushSubscriptionSchema } from "@shared/schema";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
+import { getConfig } from "./env-validation";
 
 // Extended WebSocket type with heartbeat tracking
 interface ExtendedWebSocket extends WebSocket {
@@ -27,9 +28,10 @@ const clientSessions = new Map<string, {
 }>();
 
 function getVapidKeys() {
-  let publicKey = process.env.VAPID_PUBLIC_KEY;
-  let privateKey = process.env.VAPID_PRIVATE_KEY;
-  
+  const cfg = getConfig();
+  let publicKey = cfg.vapidPublicKey;
+  let privateKey = cfg.vapidPrivateKey;
+
   if (!publicKey || !privateKey) {
     const generated = webPush.generateVAPIDKeys();
     publicKey = generated.publicKey;
@@ -42,18 +44,9 @@ function getVapidKeys() {
   } else {
     console.log("[VAPID] Using persistent VAPID keys from environment variables.");
   }
-  
+
   return { publicKey, privateKey };
 }
-
-const vapidKeys = getVapidKeys();
-
-// VAPID email must be a valid RFC 5322 address — Android FCM strictly validates this
-webPush.setVapidDetails(
-  "mailto:admin@bistro-buzzer.app",
-  vapidKeys.publicKey,
-  vapidKeys.privateKey
-);
 
 const scheduledJobs = new Map<string, schedule.Job>();
 
@@ -214,9 +207,17 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // VAPID setup — must run after validateEnvironment() has been called
+  const vapidKeys = getVapidKeys();
+  webPush.setVapidDetails(
+    "mailto:admin@bistro-buzzer.app",
+    vapidKeys.publicKey,
+    vapidKeys.privateKey
+  );
+
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/orders" });
   const adminWss = new WebSocketServer({ server: httpServer, path: "/ws/admin" });
-  
+
   // Restore scheduled notifications on startup
   await restoreScheduledNotifications();
   
