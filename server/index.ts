@@ -1,13 +1,22 @@
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import { validateEnvironment } from "./env-validation";
 import { registerRoutes } from "./routes";
-import { runMigrations, closeDb } from "./db";
+import { runMigrations, closeDb, getPool } from "./db";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { logger } from "./lib/logger";
+import "./middleware/auth";
+
+const PgSessionStore = connectPgSimple(session);
 
 const app = express();
 const httpServer = createServer(app);
+
+// Must be first — required for correct IP detection and secure cookie detection
+// behind Replit's reverse proxy.
+app.set("trust proxy", 1);
 
 declare module "http" {
   interface IncomingMessage {
@@ -65,6 +74,26 @@ process.on("unhandledRejection", (reason) => {
     });
     process.exit(1);
   }
+
+  app.use(
+    session({
+      secret: config.sessionSecret,
+      store: new PgSessionStore({
+        pool: getPool() as any,
+        tableName: "user_sessions",
+        createTableIfMissing: true,
+        pruneSessionInterval: 900,
+      }),
+      cookie: {
+        secure: "auto",
+        httpOnly: true,
+        maxAge: 86_400_000,
+        sameSite: "lax",
+      },
+      resave: false,
+      saveUninitialized: false,
+    }),
+  );
 
   await registerRoutes(httpServer, app);
 

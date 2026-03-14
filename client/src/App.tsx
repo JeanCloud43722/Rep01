@@ -7,10 +7,12 @@ import { IOSInstallPrompt } from "@/components/ios-install-prompt";
 import NotFound from "@/pages/not-found";
 import AdminPage from "@/pages/admin";
 import CustomerPage from "@/pages/customer";
+import LoginPage from "@/pages/login";
 
 function Router() {
   return (
     <Switch>
+      <Route path="/login" component={LoginPage} />
       <Route path="/" component={AdminPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/order/:id" component={CustomerPage} />

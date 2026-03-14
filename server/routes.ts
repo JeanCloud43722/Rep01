@@ -2,14 +2,17 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { readFileSync } from "fs";
 import { storage } from "./storage";
-import { getPool } from "./db";
+import { getPool, getDb } from "./db";
 import webPush from "web-push";
 import schedule from "node-schedule";
-import { pushSubscriptionSchema } from "@shared/schema";
+import { pushSubscriptionSchema, adminUsers } from "@shared/schema";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
+import { requireAuth } from "./middleware/auth";
+import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
   try {
@@ -210,6 +213,22 @@ async function restoreScheduledNotifications() {
   }
 }
 
+async function createDefaultAdmin(): Promise<void> {
+  try {
+    const db = getDb();
+    const existing = await db.select({ id: adminUsers.id }).from(adminUsers).limit(1);
+    if (existing.length > 0) return;
+    const hash = await bcrypt.hash("admin123", 12);
+    await db.insert(adminUsers).values({ username: "admin", passwordHash: hash });
+    logger.warn("Default admin created — CHANGE THE PASSWORD IMMEDIATELY", {
+      source: "auth",
+      username: "admin",
+    });
+  } catch (error) {
+    logger.error("Failed to create default admin", { source: "auth", error: (error as Error).message });
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -227,6 +246,9 @@ export async function registerRoutes(
 
   // Restore scheduled notifications on startup
   await restoreScheduledNotifications();
+
+  // Ensure at least one admin account exists
+  await createDefaultAdmin();
   
   // Customer order WebSocket connections with heartbeat
   wss.on("connection", (ws: ExtendedWebSocket, req) => {
@@ -429,6 +451,58 @@ export async function registerRoutes(
     });
   });
 
+  // ── Auth endpoints (no requireAuth — these ARE the auth gate) ────────────────
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body as { username?: string; password?: string };
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+      const db = getDb();
+      const [user] = await db
+        .select()
+        .from(adminUsers)
+        .where(eq(adminUsers.username, username))
+        .limit(1);
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      const valid = await bcrypt.compare(password, user.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      await new Promise<void>((resolve, reject) =>
+        req.session.save((err) => (err ? reject(err) : resolve()))
+      );
+      logger.info("Admin login", { source: "auth", username: user.username });
+      res.json({ ok: true, username: user.username });
+    } catch (error) {
+      logger.error("Login error", { source: "auth", error: (error as Error).message });
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    const username = req.session.username;
+    req.session.destroy(() => {
+      res.clearCookie("connect.sid");
+      logger.info("Admin logout", { source: "auth", username });
+      res.json({ ok: true });
+    });
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    res.json({ userId: req.session.userId, username: req.session.username });
+  });
+
+  // ── VAPID / public endpoints ──────────────────────────────────────────────
+
   app.get("/api/vapid-public-key", (req, res) => {
     res.json({ publicKey: vapidKeys.publicKey });
   });
@@ -476,7 +550,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders", async (req, res) => {
+  app.post("/api/orders", requireAuth, async (req, res) => {
     try {
       const order = await storage.createOrder();
       res.status(201).json(order);
@@ -485,7 +559,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/orders/:id", async (req, res) => {
+  app.delete("/api/orders/:id", requireAuth, async (req, res) => {
     try {
       const job = scheduledJobs.get(req.params.id);
       if (job) {
@@ -526,7 +600,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders/:id/trigger", async (req, res) => {
+  app.post("/api/orders/:id/trigger", requireAuth, async (req, res) => {
     try {
       const { message } = req.body || {};
       await sendNotification(req.params.id, message);
@@ -537,7 +611,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders/:id/message", async (req, res) => {
+  app.post("/api/orders/:id/message", requireAuth, async (req, res) => {
     try {
       const messageSchema = z.object({
         message: z.string().min(1).max(200)
@@ -613,7 +687,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders/:id/schedule", async (req, res) => {
+  app.post("/api/orders/:id/schedule", requireAuth, async (req, res) => {
     try {
       const scheduleSchema = z.object({
         scheduledTime: z.string(),
@@ -659,7 +733,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders/:id/offers", async (req, res) => {
+  app.post("/api/orders/:id/offers", requireAuth, async (req, res) => {
     try {
       const offerSchema = z.object({
         title: z.string().min(1),
@@ -703,7 +777,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/orders/:id/notes", async (req, res) => {
+  app.patch("/api/orders/:id/notes", requireAuth, async (req, res) => {
     try {
       const notesSchema = z.object({
         notes: z.string().max(500)

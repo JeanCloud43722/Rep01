@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -12,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -742,7 +743,27 @@ function OrdersSkeleton() {
 }
 
 export default function AdminPage() {
+  const [, navigate] = useLocation();
   const { toast } = useToast();
+
+  const { data: me, isLoading: meLoading, isError: meError } = useQuery<{ userId: number; username: string }>({
+    queryKey: ["/api/auth/me"],
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/auth/logout"),
+    onSuccess: () => {
+      queryClient.clear();
+      navigate("/login");
+    },
+  });
+
+  useEffect(() => {
+    if (!meLoading && meError) navigate("/login");
+  }, [meLoading, meError, navigate]);
+
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [notifyOrderId, setNotifyOrderId] = useState<string | null>(null);
   const [messageOrderId, setMessageOrderId] = useState<string | null>(null);
@@ -1077,7 +1098,16 @@ export default function AdminPage() {
   
   const activeOrders = orders?.filter(o => o.status !== "completed") ?? [];
   const completedOrders = orders?.filter(o => o.status === "completed") ?? [];
-  
+
+  if (meLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground text-sm">Loading…</p>
+      </div>
+    );
+  }
+  if (meError || !me) return null;
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -1119,6 +1149,16 @@ export default function AdminPage() {
             >
               <Plus className="h-4 w-4 mr-2" />
               New Order
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => logoutMutation.mutate()}
+              disabled={logoutMutation.isPending}
+              title={`Logged in as ${me.username} — click to sign out`}
+              data-testid="button-logout"
+            >
+              <LogOut className="h-4 w-4" />
             </Button>
           </div>
         </div>
