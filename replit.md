@@ -10,6 +10,8 @@ MVP complete with all core features:
 - Admin dashboard for managing multiple orders
 - Manual and scheduled notification triggers
 - In-memory storage for demo purposes
+- **i18n (English/German)**: Language toggle on customer page, localStorage persistence
+- **Local timezone display**: Countdown timers use customer's detected local timezone
 
 ## Project Architecture
 
@@ -21,6 +23,7 @@ MVP complete with all core features:
 - **State Management**: TanStack Query for server state
 - **UI Components**: Shadcn/ui with Tailwind CSS
 - **Push Notifications**: Service Worker in `client/public/sw.js`
+- **i18n**: `i18next` + `react-i18next` with inline EN/DE resources (`client/src/lib/i18n.ts`)
 
 ### Backend (server/)
 - **Express.js** API server
@@ -67,6 +70,7 @@ MVP complete with all core features:
 - `client/src/pages/admin.tsx` - Admin dashboard
 - `client/src/pages/customer.tsx` - Customer order page
 - `client/public/sw.js` - Service worker for push notifications
+- `client/src/lib/i18n.ts` - i18next setup with inline EN/DE translation resources
 - `client/src/lib/audio-manager.ts` - Singleton AudioManager with 7 distinct sound cues
 - `client/src/lib/device-capabilities.ts` - Device detection (iOS Safari, Android, desktop)
 - `client/src/lib/notification-orchestrator.ts` - Multi-channel notification routing
