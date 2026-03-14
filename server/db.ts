@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/neon-serverless";
 import { migrate } from "drizzle-orm/neon-serverless/migrator";
 import ws from "ws";
 import * as schema from "../shared/schema";
+import { logger } from "./lib/logger";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -32,7 +33,7 @@ export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
 
 export async function runMigrations(): Promise<void> {
   await migrate(getDb(), { migrationsFolder: "./migrations" });
-  console.log("[DB] Migrations complete");
+  logger.info("Migrations complete", { source: "db" });
 }
 
 export async function closeDb(): Promise<void> {
@@ -40,6 +41,6 @@ export async function closeDb(): Promise<void> {
     await _pool.end();
     _pool = null;
     _db = null;
-    console.log("[DB] Connection pool closed");
+    logger.info("Connection pool closed", { source: "db" });
   }
 }

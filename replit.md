@@ -26,7 +26,9 @@ MVP complete with all core features:
 - **Express.js** API server
 - **Web Push**: `web-push` library with VAPID key generation
 - **Scheduling**: `node-schedule` for timed notifications
-- **Storage**: In-memory Map-based storage (`server/storage.ts`)
+- **Storage**: PostgreSQL via Drizzle ORM + Neon serverless (`server/storage.ts`, `server/db.ts`)
+- **Logging**: Winston structured logging (`server/lib/logger.ts`) — JSON in production, colorized dev format; sanitizes sensitive fields; replaces all `console.*` in server code
+- **Env validation**: `server/env-validation.ts` validates all required/optional env vars at startup with clear error messages
 
 ### Shared (shared/)
 - **Type Definitions**: Zod schemas for Order, PushSubscription, etc.

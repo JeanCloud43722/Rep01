@@ -371,16 +371,14 @@ export default function CustomerPage() {
           if (ok) setAudioUnlocked(true);
         } catch {}
       }
-      if (
-        "Notification" in window &&
-        "serviceWorker" in navigator &&
-        orderId &&
-        !pushEnabled &&
-        Notification.permission === "default"
-      ) {
+      if ("Notification" in window && "serviceWorker" in navigator && orderId && !pushEnabled) {
         try {
-          const perm = await Notification.requestPermission();
-          if (perm === "granted") subscribeToPushSilent();
+          if (Notification.permission === "default") {
+            const perm = await Notification.requestPermission();
+            if (perm === "granted") subscribeToPushSilent();
+          } else if (Notification.permission === "granted") {
+            subscribeToPushSilent();
+          }
         } catch {}
       }
     };

@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { runMigrations, closeDb } from "./db";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { logger } from "./lib/logger";
 
 const app = express();
 const httpServer = createServer(app);
@@ -24,41 +25,32 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
-
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
-    const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      const durationMs = Date.now() - start;
+      const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
+      logger[level]("API request", {
+        method: req.method,
+        path,
+        status: res.statusCode,
+        durationMs,
+        ip: req.ip ?? req.socket.remoteAddress,
+      });
     }
   });
 
   next();
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled promise rejection", {
+    error: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
 });
 
 (async () => {
@@ -67,7 +59,10 @@ app.use((req, res, next) => {
   try {
     await runMigrations();
   } catch (err) {
-    console.error("[DB] Migration failed:", err);
+    logger.error("Migration failed — cannot start server", {
+      source: "db",
+      error: err instanceof Error ? err.message : String(err),
+    });
     process.exit(1);
   }
 
@@ -78,7 +73,7 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    throw err;
+    logger.error("Unhandled Express error", { status, message });
   });
 
   // importantly only setup vite in development and after
@@ -103,11 +98,12 @@ app.use((req, res, next) => {
       reusePort: true,
     },
     () => {
-      log(`serving on port ${port}`);
+      logger.info("Server listening", { source: "express", port });
     },
   );
 
   const shutdown = async () => {
+    logger.info("Shutting down…", { source: "express" });
     await closeDb();
     process.exit(0);
   };

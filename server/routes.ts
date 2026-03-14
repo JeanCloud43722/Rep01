@@ -7,6 +7,7 @@ import { pushSubscriptionSchema } from "@shared/schema";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
+import { logger } from "./lib/logger";
 
 // Extended WebSocket type with heartbeat tracking
 interface ExtendedWebSocket extends WebSocket {
@@ -36,13 +37,9 @@ function getVapidKeys() {
     const generated = webPush.generateVAPIDKeys();
     publicKey = generated.publicKey;
     privateKey = generated.privateKey;
-    console.warn("[VAPID] WARNING: Using ephemeral VAPID keys generated at startup.");
-    console.warn("[VAPID] Push notifications WILL FAIL on Android/iOS after server restart.");
-    console.warn("[VAPID] Set persistent keys as environment variables:");
-    console.warn(`[VAPID] VAPID_PUBLIC_KEY=${publicKey}`);
-    console.warn(`[VAPID] VAPID_PRIVATE_KEY=${privateKey}`);
+    logger.warn("Using ephemeral VAPID keys — push subscriptions will not survive restarts", { source: "vapid", hint: "Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in Replit Secrets" });
   } else {
-    console.log("[VAPID] Using persistent VAPID keys from environment variables.");
+    logger.info("Using persistent VAPID keys from environment", { source: "vapid" });
   }
 
   return { publicKey, privateKey };
@@ -67,7 +64,7 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
   
   // Push notifications are optional - if no subscription, skip silently
   if (!order.subscription) {
-    console.log(`[Notification] No push subscription for order ${orderId}, using WebSocket only`);
+    logger.debug("No push subscription, WebSocket only", { source: "push", orderId });
     return false;
   }
 
@@ -79,7 +76,7 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
 
   try {
     const notifType = notificationNumber > 1 ? `reminder ${notificationNumber}/3` : "notification";
-    console.log(`[Notification] Sending push ${notifType} to order ${orderId}`);
+    logger.info("Sending push notification", { source: "push", orderId, notifType });
     await webPush.sendNotification(
       {
         endpoint: order.subscription.endpoint,
@@ -91,10 +88,10 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
       payload
     );
     
-    console.log(`[Notification] Successfully sent push ${notifType} to order ${orderId}`);
+    logger.info("Push notification sent", { source: "push", orderId, notifType });
     return true;
   } catch (error) {
-    console.error(`[Notification] Failed to send push notification to order ${orderId}:`, error);
+    logger.error("Push notification failed", { source: "push", orderId, error: (error as Error).message });
     return false;
   }
 }
@@ -115,7 +112,7 @@ async function sendNotification(orderId: string, message?: string) {
   // Always notify WebSocket subscribers (works on all devices including iOS)
   notifyOrderUpdate(orderId, "order_ready");
   notifyAdminUpdate(orderId, "order_ready");
-  console.log(`[Notification] WebSocket notification sent for order ${orderId}`);
+  logger.info("WebSocket order_ready notification sent", { source: "ws", orderId });
   
   // Try to send push notifications if subscription exists (optional, best-effort)
   if (order.subscription) {
@@ -139,19 +136,19 @@ async function sendNotification(orderId: string, message?: string) {
 function scheduleNotification(orderId: string, scheduledDate: Date, message?: string) {
   const job = schedule.scheduleJob(scheduledDate, async () => {
     try {
-      console.log(`[Schedule] Scheduled notification firing for order ${orderId} at ${new Date().toISOString()}`);
+      logger.info("Scheduled notification firing", { source: "schedule", orderId, firedAt: new Date().toISOString() });
       await sendNotification(orderId, message);
       scheduledJobs.delete(orderId);
     } catch (error) {
-      console.error(`[Schedule] Scheduled notification failed for order ${orderId}:`, error);
+      logger.error("Scheduled notification failed", { source: "schedule", orderId, error: (error as Error).message });
     }
   });
   
   if (job) {
-    console.log(`[Schedule] Notification scheduled for order ${orderId} at ${scheduledDate.toISOString()}`);
+    logger.info("Notification scheduled", { source: "schedule", orderId, scheduledAt: scheduledDate.toISOString() });
     scheduledJobs.set(orderId, job);
   } else {
-    console.warn(`[Schedule] Failed to schedule notification for order ${orderId} at ${scheduledDate.toISOString()}`);
+    logger.warn("Failed to schedule notification", { source: "schedule", orderId, scheduledAt: scheduledDate.toISOString() });
   }
   
   return job;
@@ -180,7 +177,7 @@ function notifyAdminUpdate(orderId: string, eventType: OrderEventType) {
 
 async function restoreScheduledNotifications() {
   try {
-    console.log("[Startup] Restoring scheduled notifications...");
+    logger.info("Restoring scheduled notifications from DB", { source: "startup" });
     const orders = await storage.getAllOrders();
     let restoredCount = 0;
     
@@ -197,9 +194,9 @@ async function restoreScheduledNotifications() {
       }
     }
     
-    console.log(`[Startup] Restored ${restoredCount} scheduled notifications`);
+    logger.info("Scheduled notifications restored", { source: "startup", restoredCount });
   } catch (error) {
-    console.error("[Startup] Failed to restore scheduled notifications:", error);
+    logger.error("Failed to restore scheduled notifications", { source: "startup", error: (error as Error).message });
   }
 }
 
@@ -246,7 +243,7 @@ export async function registerRoutes(
         lastMessageTimestamp: ws.lastMessageTimestamp,
         lastSeen: Date.now()
       });
-      console.log(`[WebSocket] Client ${clientId} reconnected for order ${orderId}`);
+      logger.info("WebSocket client reconnected", { source: "ws", clientId, orderId });
     }
     
     // Add this connection to the order's subscribers
@@ -311,7 +308,7 @@ export async function registerRoutes(
     });
     
     ws.on("error", (error) => {
-      console.error(`[WebSocket] Error for order ${orderId}:`, error.message);
+      logger.error("Customer WebSocket error", { source: "ws", orderId, error: error.message });
     });
   });
   
@@ -320,7 +317,7 @@ export async function registerRoutes(
     wss.clients.forEach((ws) => {
       const extWs = ws as ExtendedWebSocket;
       if (!extWs.isAlive) {
-        console.log(`[WebSocket] Terminating unresponsive customer connection`);
+        logger.warn("Terminating unresponsive customer WebSocket", { source: "ws" });
         return extWs.terminate();
       }
       extWs.isAlive = false;
@@ -341,7 +338,7 @@ export async function registerRoutes(
   adminWss.on("connection", (ws: ExtendedWebSocket) => {
     ws.isAlive = true;
     adminSubscribers.add(ws);
-    console.log("[WebSocket] Admin client connected");
+    logger.info("Admin WebSocket connected", { source: "ws" });
     
     // Send connection acknowledgment
     ws.send(JSON.stringify({
@@ -366,11 +363,11 @@ export async function registerRoutes(
     
     ws.on("close", () => {
       adminSubscribers.delete(ws);
-      console.log("[WebSocket] Admin client disconnected");
+      logger.info("Admin WebSocket disconnected", { source: "ws" });
     });
     
     ws.on("error", (error) => {
-      console.error("[WebSocket] Admin error:", error.message);
+      logger.error("Admin WebSocket error", { source: "ws", error: error.message });
     });
   });
   
@@ -379,7 +376,7 @@ export async function registerRoutes(
     adminWss.clients.forEach((ws) => {
       const extWs = ws as ExtendedWebSocket;
       if (!extWs.isAlive) {
-        console.log(`[WebSocket] Terminating unresponsive admin connection`);
+        logger.warn("Terminating unresponsive admin WebSocket", { source: "ws" });
         return extWs.terminate();
       }
       extWs.isAlive = false;
@@ -498,7 +495,7 @@ export async function registerRoutes(
       await sendNotification(req.params.id, message);
       res.json({ success: true });
     } catch (error) {
-      console.error("Trigger error:", error);
+      logger.error("Trigger notification error", { source: "api", orderId: req.params.id, error: (error as Error).message });
       res.status(500).json({ error: "Failed to send notification" });
     }
   });
@@ -521,7 +518,7 @@ export async function registerRoutes(
       // Always notify WebSocket subscribers (works on all devices including iOS)
       notifyOrderUpdate(req.params.id, "message");
       notifyAdminUpdate(req.params.id, "message");
-      console.log(`[Message] Sent message to order ${req.params.id}: ${message}`);
+      logger.info("Staff message sent via WebSocket", { source: "api", orderId: req.params.id });
       
       // Try to send push notifications if subscription exists (optional, best-effort)
       if (order.subscription) {
@@ -544,7 +541,7 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid message" });
       }
-      console.error("Message error:", error);
+      logger.error("Send message error", { source: "api", orderId: req.params.id, error: (error as Error).message });
       res.status(500).json({ error: "Failed to send message" });
     }
   });
@@ -567,14 +564,14 @@ export async function registerRoutes(
       // Notify admin via WebSocket and also notify customer's own WebSocket for thread update
       notifyOrderUpdate(req.params.id, "message");
       notifyAdminUpdate(req.params.id, "message");
-      console.log(`[Message] Customer sent message to order ${req.params.id}: ${message}`);
+      logger.info("Customer message forwarded", { source: "api", orderId: req.params.id });
       
       res.json({ success: true });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid message" });
       }
-      console.error("Customer message error:", error);
+      logger.error("Customer message error", { source: "api", orderId: req.params.id, error: (error as Error).message });
       res.status(500).json({ error: "Failed to send message" });
     }
   });
@@ -592,7 +589,7 @@ export async function registerRoutes(
       const existingJob = scheduledJobs.get(req.params.id);
       if (existingJob) {
         existingJob.cancel();
-        console.log(`[Schedule] Cancelled previous job for order ${req.params.id}`);
+        logger.info("Cancelled previous scheduled job", { source: "schedule", orderId: req.params.id });
       }
       
       const scheduledDate = new Date(scheduledTime);
@@ -603,7 +600,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Scheduled time must be in the future" });
       }
       
-      console.log(`[Schedule] Request to schedule for ${scheduledDate.toISOString()}, current time: ${now.toISOString()}, delay: ${Math.round((scheduledDate.getTime() - now.getTime()) / 1000)}s`);
+      logger.info("Schedule request received", { source: "schedule", orderId: req.params.id, scheduledAt: scheduledDate.toISOString(), delaySecs: Math.round((scheduledDate.getTime() - now.getTime()) / 1000) });
       
       const order = await storage.updateOrderScheduledTime(req.params.id, scheduledTime);
       if (!order) {

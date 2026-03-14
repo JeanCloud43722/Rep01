@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { logger } from "./lib/logger";
 
 export interface AppConfig {
   databaseUrl: string;
@@ -23,8 +24,7 @@ export function validateEnvironment(): AppConfig {
   }
 
   if (errors.length > 0) {
-    console.error("[Config] ❌ Environment validation failed:");
-    errors.forEach((e) => console.error(`  • ${e}`));
+    logger.error("Environment validation failed", { errors });
     process.exit(1);
   }
 
@@ -32,8 +32,7 @@ export function validateEnvironment(): AppConfig {
   const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || undefined;
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || undefined;
   if (!vapidPublicKey || !vapidPrivateKey) {
-    console.warn("[Config] ⚠️  Ephemeral VAPID keys generated. Push subscriptions will NOT survive restarts.");
-    console.warn("[Config]    Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in Replit Secrets for persistent push.");
+    logger.warn("Ephemeral VAPID keys will be generated. Push subscriptions will NOT survive restarts.", { source: "config" });
   }
 
   // PORT — optional, default 5000, must be 1–65535
@@ -42,7 +41,7 @@ export function validateEnvironment(): AppConfig {
   if (rawPort !== undefined) {
     const parsed = parseInt(rawPort, 10);
     if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
-      console.warn(`[Config] PORT "${rawPort}" is invalid — falling back to 5000.`);
+      logger.warn(`PORT "${rawPort}" is invalid — falling back to 5000.`, { source: "config" });
     } else {
       port = parsed;
     }
@@ -55,7 +54,7 @@ export function validateEnvironment(): AppConfig {
     if (rawNodeEnv === "development" || rawNodeEnv === "production") {
       nodeEnv = rawNodeEnv;
     } else {
-      console.warn(`[Config] NODE_ENV "${rawNodeEnv}" is not recognised — must be development or production.`);
+      logger.warn(`NODE_ENV "${rawNodeEnv}" is not recognised — must be development or production.`, { source: "config" });
     }
   }
 
@@ -63,8 +62,7 @@ export function validateEnvironment(): AppConfig {
   let sessionSecret = process.env.SESSION_SECRET;
   if (!sessionSecret) {
     sessionSecret = crypto.randomBytes(32).toString("hex");
-    console.warn("[Config] ⚠️  SESSION_SECRET not set — using a random secret. Sessions will be invalidated on restart.");
-    console.warn("[Config]    Set SESSION_SECRET in Replit Secrets for persistent sessions.");
+    logger.warn("SESSION_SECRET not set — using a random secret. Sessions will be invalidated on restart.", { source: "config" });
   }
 
   // ALLOWED_ORIGIN — optional, default covers Replit preview domains
@@ -78,7 +76,7 @@ export function validateEnvironment(): AppConfig {
     if (validLogLevels.includes(rawLogLevel as AppConfig["logLevel"])) {
       logLevel = rawLogLevel as AppConfig["logLevel"];
     } else {
-      console.warn(`[Config] LOG_LEVEL "${rawLogLevel}" is invalid — must be debug|info|warn|error. Defaulting to info.`);
+      logger.warn(`LOG_LEVEL "${rawLogLevel}" is invalid — must be debug|info|warn|error. Defaulting to info.`, { source: "config" });
     }
   }
 
@@ -93,7 +91,7 @@ export function validateEnvironment(): AppConfig {
     logLevel,
   };
 
-  console.log(`[Config] Environment validated. port=${port} nodeEnv=${nodeEnv ?? "unset"} logLevel=${logLevel}`);
+  logger.info("Environment validated", { source: "config", port, nodeEnv: nodeEnv ?? "unset", logLevel });
   return _config;
 }
 
