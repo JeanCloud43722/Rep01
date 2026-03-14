@@ -1,0 +1,33 @@
+{
+  "id": 0,
+  "title": "Bistro Buzzer: Critical Architecture Context for Replit AI Agent",
+  "priority": "P0-Prerequisite",
+  "depends_on": [],
+  "context": "This prompt provides essential architecture knowledge required before executing any optimization prompts. Read this entire context before proceeding.",
+  "task": "Internalize the following architecture decisions, Replit constraints, and execution rules. Do not generate code—this is context only.",
+  "detailed_instructions": [
+    "PROJECT SCOPE: Bistro Buzzer is a restaurant digital buzzer PWA. Customers scan QR codes to view order status. Staff use admin dashboard to manage orders. Real-time updates via WebSocket + push notifications.",
+    "CRITICAL ARCHITECTURE DECISIONS:",
+    "- Storage: JSONB columns for inline arrays (messages[], offers[], serviceRequests[]) — NOT normalized tables. Preserves IStorage interface, avoids complex JOINs.",
+    "- Auth: Session-based with connect-pg-simple. HttpOnly cookies. Admin-only protection; customer routes remain public (order ID as bearer token).",
+    "- WebSocket: Customer WS intentionally unauthenticated. Mitigations: rate limiting, connection limits per order ID, session cleanup.",
+    "- Push: Web Push with tracked retry. iOS requires 'Add to Home Screen' installation. Fallback to WebSocket-only for non-installed iOS.",
+    "- Polling: Adaptive (15s when WS connected, 3s when disconnected). TanStack Query configured with staleTime: Infinity.",
+    "REPLIT-SPECIFIC CONSTRAINTS:",
+    "- Single-process Node.js environment. No Redis, no external load balancers.",
+    "- PostgreSQL provided via Neon (DATABASE_URL in Secrets). 10GB free tier limit.",
+    "- Only PORT env var is not firewalled. Use app.set('trust proxy', 1) for correct IP detection.",
+    "- Secrets are AES-256 encrypted. Use for: SESSION_SECRET, VAPID keys, ADMIN_PASSWORD, ALLOWED_ORIGIN.",
+    "- Deployment: Use 'Autoscale' or 'Reserved VM' (not Static Deployment). Build via npm run build, start via npm start.",
+    "EXECUTION RULES FOR ALL PROMPTS:",
+    "- Always preserve the IStorage interface contract. Every storage method must return the exact Order shape.",
+    "- Never expose stack traces or internal errors to clients. Use structured logging server-side.",
+    "- Customer-facing functionality must work without authentication.",
+    "- Test each prompt's checkpoint before proceeding to the next.",
+    "- If a prompt fails, fix the issue manually, then tell the AI to continue.",
+    "DEPENDENCY ORDER: Prompts must be executed in numerical order. Each prompt lists its depends_on IDs. Do not skip prompts.",
+    "TESTING: After each prompt, verify the testing_checkpoint manually in Replit preview before proceeding."
+  ],
+  "replit_note": "This context prompt ensures the AI agent has all necessary architecture knowledge before generating code. It prevents common mistakes like normalizing JSONB tables or adding auth to customer routes.",
+  "testing_checkpoint": "No code changes. Confirm you understand the context by proceeding to Prompt 1."
+}
