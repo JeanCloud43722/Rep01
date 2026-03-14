@@ -142,9 +142,14 @@ function OrderCard({
 
         {order.messages.length > 0 && (
           <div className="text-sm bg-muted/50 rounded-md px-3 py-2 space-y-2">
-            <p className="font-medium text-xs text-muted-foreground">Messages ({order.messages.length})</p>
+            <p className="font-medium text-xs text-muted-foreground">
+              Messages — Showing all {order.messages.length}
+              {(order as any).totalMessages && (order as any).totalMessages > order.messages.length && (
+                <span className="ml-1 text-amber-600 dark:text-amber-500">({(order as any).totalMessages} total in full view)</span>
+              )}
+            </p>
             <div className="space-y-1.5 max-h-36 overflow-y-auto">
-              {[...order.messages].reverse().slice(0, 5).map((msg) => (
+              {[...order.messages].reverse().map((msg) => (
                 <div key={msg.id} className="flex items-start gap-1.5 text-xs">
                   <Badge
                     variant={msg.sender === "customer" ? "default" : "secondary"}
