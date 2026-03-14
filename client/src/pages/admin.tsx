@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { audioManager } from "@/lib/audio-manager";
+import { useAdminWebSocket } from "@/hooks/use-admin-websocket";
 import type { Order } from "@shared/schema";
 
 import { Button } from "@/components/ui/button";
@@ -807,6 +808,26 @@ export default function AdminPage() {
     }
   }, []);
   
+  const showEventToast = useCallback((eventType: string, orderId: string) => {
+    if (eventType === "service_request") {
+      toast({
+        title: "Service Request",
+        description: `Order ${orderId} needs assistance`,
+        variant: "destructive",
+      });
+    } else if (eventType === "new_registration") {
+      toast({
+        title: "New Customer",
+        description: `Order ${orderId} customer arrived`,
+      });
+    } else if (eventType === "message") {
+      toast({
+        title: "Customer Message",
+        description: `Order ${orderId.slice(0, 8).toUpperCase()} sent a message`,
+      });
+    }
+  }, [toast]);
+
   const enableAudio = useCallback(() => {
     if (audioEnabledRef.current) return;
     console.log('[Admin Audio] Auto-enabling audio...');
@@ -838,120 +859,13 @@ export default function AdminPage() {
     };
   }, [enableAudio]);
   
-  // Connect to admin WebSocket for real-time service request alerts
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/admin`;
-    
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout | null = null;
-    let reconnectAttempts = 0;
-    const MAX_RECONNECT_ATTEMPTS = 10;
-    const INITIAL_BACKOFF = 1000;
-    const MAX_BACKOFF = 30000;
-    
-    const connect = () => {
-      try {
-        ws = new WebSocket(wsUrl);
-        
-        ws.onopen = () => {
-          console.log("[Admin WS] Connected to admin updates");
-          reconnectAttempts = 0;
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            
-            if (message.type === "ping") {
-              ws?.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
-              return;
-            }
-            
-            if (message.type === "connected") {
-              console.log("[Admin WS] Connection acknowledged");
-              return;
-            }
-            
-            console.log("[Admin WS] Received:", message);
-            
-            if (message.type === "admin_update") {
-              const eventType = message.eventType as 'service_request' | 'new_registration' | 'order_completed' | 'message';
-              if (eventType) {
-                playStaffSound(eventType);
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-              }
-              
-              if (message.eventType === "service_request") {
-                toast({
-                  title: "Service Request",
-                  description: `Order ${message.orderId} needs assistance`,
-                  variant: "destructive"
-                });
-              } else if (message.eventType === "new_registration") {
-                toast({
-                  title: "New Customer",
-                  description: `Order ${message.orderId} customer arrived`,
-                });
-              } else if (message.eventType === "message") {
-                toast({
-                  title: "Customer Message",
-                  description: `Order ${message.orderId.slice(0, 8).toUpperCase()} sent a message`,
-                });
-              }
-              
-              queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-            }
-          } catch (e) {
-            console.warn("[Admin WS] Failed to parse message:", e);
-          }
-        };
-        
-        ws.onclose = (event) => {
-          if (event.code === 4001) {
-            console.warn("[Admin WS] Unauthorized — redirecting to login");
-            window.location.href = "/login";
-            return;
-          }
-          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
-            reconnectAttempts++;
-            console.log(`[Admin WS] Reconnecting in ${backoff}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-            reconnectTimeout = setTimeout(connect, backoff);
-          }
-        };
-        
-        ws.onerror = () => {
-          console.error("[Admin WS] WebSocket error");
-          ws?.close();
-        };
-      } catch (error) {
-        console.error("[Admin WS] Failed to connect:", error);
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
-          reconnectAttempts++;
-          reconnectTimeout = setTimeout(connect, backoff);
-        }
-      }
-    };
-    
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && (!ws || ws.readyState !== WebSocket.OPEN)) {
-        console.log("[Admin WS] Page became visible, reconnecting...");
-        reconnectAttempts = 0;
-        connect();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    connect();
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) ws.close();
-    };
-  }, [toast, audioEnabled, playStaffSound]);
+  // Admin WebSocket — real-time alerts via reusable hook
+  const { connectionStatus } = useAdminWebSocket((eventType, orderId) => {
+    playStaffSound(eventType as "service_request" | "new_registration" | "order_completed" | "message");
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    showEventToast(eventType, orderId);
+    queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+  });
   
   const createOrderMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/orders"),
@@ -1122,6 +1036,19 @@ export default function AdminPage() {
               <Bell className="h-5 w-5" />
             </div>
             <h1 className="text-xl font-semibold">Restaurant Buzzer</h1>
+            <span
+              data-testid="status-ws-connection"
+              title={`WebSocket: ${connectionStatus}`}
+              className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${
+                connectionStatus === "connected"
+                  ? "bg-green-500"
+                  : connectionStatus === "reconnecting"
+                    ? "bg-yellow-500"
+                    : connectionStatus === "connecting"
+                      ? "bg-yellow-400 animate-pulse"
+                      : "bg-red-500"
+              }`}
+            />
           </div>
           
           <div className="flex items-center gap-2">
