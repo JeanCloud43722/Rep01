@@ -1,5 +1,5 @@
-import type { Express } from "express";
-import { createServer, type Server } from "http";
+import type { Express, RequestHandler } from "express";
+import { createServer, type Server, type IncomingMessage } from "http";
 import { readFileSync } from "fs";
 import { storage } from "./storage";
 import { getPool, getDb } from "./db";
@@ -231,7 +231,8 @@ async function createDefaultAdmin(): Promise<void> {
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
+  sessionMiddleware: RequestHandler
 ): Promise<Server> {
   // VAPID setup — must run after validateEnvironment() has been called
   const vapidKeys = getVapidKeys();
@@ -241,8 +242,46 @@ export async function registerRoutes(
     vapidKeys.privateKey
   );
 
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws/orders" });
-  const adminWss = new WebSocketServer({ server: httpServer, path: "/ws/admin" });
+  // Both servers use noServer:true so we own the single upgrade handler.
+  // ws 8.x calls abortHandshake(400) for non-matching paths, so two servers
+  // sharing httpServer with different paths cannot coexist — the first server
+  // kills sockets meant for the second before it can claim them.
+  const wss = new WebSocketServer({ noServer: true });
+  const adminWss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (req: IncomingMessage, socket, head) => {
+    const pathname = (req.url ?? "").split("?")[0];
+
+    if (pathname === "/ws/orders") {
+      wss.handleUpgrade(req, socket as any, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } else if (pathname === "/ws/admin") {
+      const fakeRes = {
+        end: () => {},
+        write: () => {},
+        getHeader: () => undefined,
+        setHeader: () => {},
+        removeHeader: () => {},
+        on: () => {},
+      } as any;
+      sessionMiddleware(req as any, fakeRes, () => {
+        const sess = (req as any).session as { userId?: number } | undefined;
+        if (!sess?.userId) {
+          logger.warn("Unauthorized admin WebSocket upgrade rejected", { source: "ws" });
+          adminWss.handleUpgrade(req, socket as any, head, (ws) => {
+            ws.close(4001, "Unauthorized");
+          });
+          return;
+        }
+        adminWss.handleUpgrade(req, socket as any, head, (ws) => {
+          adminWss.emit("connection", ws, req);
+        });
+      });
+    }
+    // Any other path (e.g., Vite HMR) is intentionally ignored — Vite
+    // registers its own upgrade listener on the same httpServer.
+  });
 
   // Restore scheduled notifications on startup
   await restoreScheduledNotifications();
@@ -366,38 +405,30 @@ export async function registerRoutes(
     clearInterval(customerHeartbeat);
   });
   
-  // Admin dashboard WebSocket connections with heartbeat
+  // Admin dashboard WebSocket connections — auth already verified in upgrade handler
   adminWss.on("connection", (ws: ExtendedWebSocket) => {
     ws.isAlive = true;
     adminSubscribers.add(ws);
     logger.info("Admin WebSocket connected", { source: "ws" });
-    
-    // Send connection acknowledgment
-    ws.send(JSON.stringify({
-      type: "connected",
-      serverTimestamp: Date.now()
-    }));
-    
-    ws.on("pong", () => {
-      ws.isAlive = true;
-    });
-    
+
+    ws.send(JSON.stringify({ type: "connected", serverTimestamp: Date.now() }));
+
+    ws.on("pong", () => { ws.isAlive = true; });
+
     ws.on("message", (data) => {
       try {
-        const message = JSON.parse(data.toString());
-        if (message.type === "pong") {
-          ws.isAlive = true;
-        }
-      } catch (e) {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === "pong") ws.isAlive = true;
+      } catch {
         // Ignore parse errors
       }
     });
-    
+
     ws.on("close", () => {
       adminSubscribers.delete(ws);
       logger.info("Admin WebSocket disconnected", { source: "ws" });
     });
-    
+
     ws.on("error", (error) => {
       logger.error("Admin WebSocket error", { source: "ws", error: error.message });
     });
@@ -507,7 +538,7 @@ export async function registerRoutes(
     res.json({ publicKey: vapidKeys.publicKey });
   });
 
-  app.get("/api/orders", async (req, res) => {
+  app.get("/api/orders", requireAuth, async (req, res) => {
     try {
       const orders = await storage.getAllOrders();
       res.json(orders);

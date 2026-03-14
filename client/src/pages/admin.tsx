@@ -907,7 +907,12 @@ export default function AdminPage() {
           }
         };
         
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+          if (event.code === 4001) {
+            console.warn("[Admin WS] Unauthorized — redirecting to login");
+            window.location.href = "/login";
+            return;
+          }
           if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, reconnectAttempts), MAX_BACKOFF);
             reconnectAttempts++;

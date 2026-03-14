@@ -75,27 +75,27 @@ process.on("unhandledRejection", (reason) => {
     process.exit(1);
   }
 
-  app.use(
-    session({
-      secret: config.sessionSecret,
-      store: new PgSessionStore({
-        pool: getPool() as any,
-        tableName: "user_sessions",
-        createTableIfMissing: true,
-        pruneSessionInterval: 900,
-      }),
-      cookie: {
-        secure: "auto",
-        httpOnly: true,
-        maxAge: 86_400_000,
-        sameSite: "lax",
-      },
-      resave: false,
-      saveUninitialized: false,
+  const sessionMiddleware = session({
+    secret: config.sessionSecret,
+    store: new PgSessionStore({
+      pool: getPool() as any,
+      tableName: "user_sessions",
+      createTableIfMissing: true,
+      pruneSessionInterval: 900,
     }),
-  );
+    cookie: {
+      secure: "auto",
+      httpOnly: true,
+      maxAge: 86_400_000,
+      sameSite: "lax",
+    },
+    resave: false,
+    saveUninitialized: false,
+  });
 
-  await registerRoutes(httpServer, app);
+  app.use(sessionMiddleware);
+
+  await registerRoutes(httpServer, app, sessionMiddleware);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
