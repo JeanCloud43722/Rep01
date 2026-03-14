@@ -50,6 +50,10 @@ export class MemStorage implements IStorage {
     this.orders = new Map();
   }
 
+  reset(): void {
+    this.orders.clear();
+  }
+
   async getAllOrders(): Promise<Order[]> {
     return Array.from(this.orders.values()).sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
