@@ -1,0 +1,21 @@
+{
+  "id": 16,
+  "title": "Implement Tracked Retry Loop for Push Notifications",
+  "priority": "P1-High",
+  "depends_on": [2],
+  "context": "Current push sends 3 fire-and-forget attempts without tracking delivery. May produce duplicates. No handling for revoked permissions (HTTP 410).",
+  "task": "Replace fire-and-forget setTimeout calls with a sequential retry loop that tracks delivery.",
+  "detailed_instructions": [
+    "In server/routes.ts, create sendNotificationWithRetry(orderId, message, maxAttempts) async function.",
+    "Loop through attempts with delays [0, 2000, 4000]: for (let i = 0; i < maxAttempts; i++) { if (i > 0) await sleep(delays[i]); const success = await sendSinglePushNotification(...); if (success) { logger.info('Push delivered', { orderId, attempt: i+1 }); return true; } }",
+    "CRITICAL: On HTTP 404 or 410 response from webPush.sendNotification(): delete the push subscription from database/storage. Log warning: 'Subscription removed (user revoked)'. ABORT all retries.",
+    "On other errors: log the error, continue to next attempt.",
+    "After all attempts fail: log 'All push attempts failed' with orderId.",
+    "Use priority-based attempt counts: order_ready events get 3 attempts; message events get 1 attempt (less critical).",
+    "In sendNotification() function, call sendNotificationWithRetry without await (fire-and-forget the entire retry chain, not individual attempts).",
+    "Also apply the same pattern to the /message endpoint's push sending.",
+    "OPTIONAL: In customer.tsx, when order status becomes 'completed', call pushSubscription.unsubscribe() to clean up the browser-side subscription for privacy."
+  ],
+  "replit_note": "Background processing runs in same Node process. Deleting stale subscriptions saves resources. Monitor push delivery rates via structured logs.",
+  "testing_checkpoint": "Trigger notification — logs show 'delivered on attempt 1'. Revoke push permission on device — next trigger logs 'subscription removed (410)' and no retries."
+}

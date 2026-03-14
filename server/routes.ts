@@ -78,7 +78,7 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
   // Push notifications are optional - if no subscription, skip silently
   if (!order.subscription) {
     logger.debug("No push subscription, WebSocket only", { source: "push", orderId });
-    return false;
+    return { success: false, revoked: false };
   }
 
   const payload = JSON.stringify({
@@ -102,11 +102,52 @@ async function sendSinglePushNotification(orderId: string, message?: string, not
     );
     
     logger.info("Push notification sent", { source: "push", orderId, notifType });
-    return true;
+    return { success: true, revoked: false };
   } catch (error) {
-    logger.error("Push notification failed", { source: "push", orderId, error: (error as Error).message });
-    return false;
+    const err = error as any;
+    const statusCode = err.statusCode || err.status;
+    
+    // HTTP 404/410: subscription revoked — delete and stop retrying
+    if (statusCode === 404 || statusCode === 410) {
+      logger.warn("Subscription removed (user revoked permission)", { source: "push", orderId, statusCode });
+      // Delete the revoked subscription
+      await storage.updateOrderSubscription(orderId, null as any);
+      return { success: false, revoked: true };
+    }
+    
+    // Other errors: log and allow retry
+    logger.error("Push notification failed", { source: "push", orderId, error: err.message, statusCode });
+    return { success: false, revoked: false };
   }
+}
+
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function sendNotificationWithRetry(orderId: string, message?: string, maxAttempts: number = 3) {
+  const delays = [0, 2000, 4000];
+  
+  for (let i = 0; i < maxAttempts; i++) {
+    if (i > 0) {
+      await sleep(delays[i] || 4000);
+    }
+    
+    const result = await sendSinglePushNotification(orderId, message, i + 1);
+    
+    if (result.success) {
+      logger.info("Push delivered", { source: "push", orderId, attempt: i + 1 });
+      return true;
+    }
+    
+    if (result.revoked) {
+      logger.info("Aborting push retries (subscription revoked)", { source: "push", orderId });
+      return false;
+    }
+  }
+  
+  logger.warn("All push attempts failed", { source: "push", orderId });
+  return false;
 }
 
 async function sendNotification(orderId: string, message?: string) {
@@ -128,19 +169,9 @@ async function sendNotification(orderId: string, message?: string) {
   logger.info("WebSocket order_ready notification sent", { source: "ws", orderId });
   
   // Try to send push notifications if subscription exists (optional, best-effort)
+  // Fire-and-forget the entire retry chain
   if (order.subscription) {
-    // Send first push notification immediately
-    sendSinglePushNotification(orderId, message, 1).catch(() => {});
-    
-    // Send 2nd push notification after 2 seconds
-    setTimeout(() => {
-      sendSinglePushNotification(orderId, message, 2).catch(() => {});
-    }, 2000);
-    
-    // Send 3rd push notification after 4 seconds
-    setTimeout(() => {
-      sendSinglePushNotification(orderId, message, 3).catch(() => {});
-    }, 4000);
+    sendNotificationWithRetry(orderId, message, 3).catch(() => {});
   }
   
   return true;
@@ -689,19 +720,9 @@ export async function registerRoutes(
       logger.info("Staff message sent via WebSocket", { source: "api", orderId: req.params.id });
       
       // Try to send push notifications if subscription exists (optional, best-effort)
+      // Messages are less critical — use only 1 attempt
       if (order.subscription) {
-        // Send first push notification immediately
-        sendSinglePushNotification(req.params.id, message, 1).catch(() => {});
-        
-        // Send 2nd push notification after 2 seconds
-        setTimeout(() => {
-          sendSinglePushNotification(req.params.id, message, 2).catch(() => {});
-        }, 2000);
-        
-        // Send 3rd push notification after 4 seconds
-        setTimeout(() => {
-          sendSinglePushNotification(req.params.id, message, 3).catch(() => {});
-        }, 4000);
+        sendNotificationWithRetry(req.params.id, message, 1).catch(() => {});
       }
       
       res.json({ success: true });
