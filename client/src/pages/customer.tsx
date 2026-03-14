@@ -419,13 +419,18 @@ export default function CustomerPage() {
     offlineStorage.getOrder(orderId).then((c) => { if (c) setCachedOrder(c); });
   }, [orderId]);
 
-  // ── query ──
+  // ── query — polling slows down when WebSocket is healthy ──
+  const pollInterval = wsConnected ? 15000 : 3000;
   const { data: order, isLoading } = useQuery<Order>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
-    refetchInterval: 2000,
+    refetchInterval: pollInterval,
     initialData: cachedOrder || undefined,
   });
+
+  useEffect(() => {
+    console.log(`[Customer Poll] ${pollInterval}ms (WS: ${wsConnected})`);
+  }, [pollInterval, wsConnected]);
 
   useEffect(() => {
     if (order && orderId) offlineStorage.saveOrder(order).catch(console.warn);
@@ -442,6 +447,7 @@ export default function CustomerPage() {
           if (msg.eventType === "order_ready") playBuzzer();
           else if (msg.eventType === "message") playMessageChime();
           queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+          queryClient.refetchQueries({ queryKey: ["/api/orders", orderId] });
         } else if (msg.type === "sync_response" && msg.order) {
           queryClient.setQueryData(["/api/orders", orderId], msg.order);
         }
@@ -460,6 +466,7 @@ export default function CustomerPage() {
       if (event.data?.type === "ORDER_READY") {
         playBuzzer();
         queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+        queryClient.refetchQueries({ queryKey: ["/api/orders", orderId] });
       }
     };
     navigator.serviceWorker.addEventListener("message", handle);

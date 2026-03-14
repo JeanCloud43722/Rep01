@@ -785,11 +785,6 @@ export default function AdminPage() {
     });
   }, []);
   
-  const { data: orders, isLoading, refetch } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
-    refetchInterval: 2000
-  });
-  
   const playStaffSound = useCallback((type: 'service_request' | 'new_registration' | 'order_completed' | 'message') => {
     if (!audioEnabledRef.current || isAdminMutedRef.current) return;
     switch (type) {
@@ -865,8 +860,20 @@ export default function AdminPage() {
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     showEventToast(eventType, orderId);
     queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    queryClient.refetchQueries({ queryKey: ["/api/orders"] });
   });
-  
+
+  // ── query — polling slows down when WebSocket is healthy ──
+  const pollInterval = connectionStatus === "connected" ? 15000 : 3000;
+  const { data: orders, isLoading, refetch } = useQuery<Order[]>({
+    queryKey: ["/api/orders"],
+    refetchInterval: pollInterval,
+  });
+
+  useEffect(() => {
+    console.log(`[Admin Poll] ${pollInterval}ms (WS: ${connectionStatus})`);
+  }, [pollInterval, connectionStatus]);
+
   const createOrderMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/orders"),
     onSuccess: () => {
