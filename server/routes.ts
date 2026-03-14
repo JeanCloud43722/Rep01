@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { readFileSync } from "fs";
 import { storage } from "./storage";
+import { getPool } from "./db";
 import webPush from "web-push";
 import schedule from "node-schedule";
 import { pushSubscriptionSchema } from "@shared/schema";
@@ -8,6 +10,14 @@ import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
+
+const VERSION = (() => {
+  try {
+    return (JSON.parse(readFileSync("./package.json", "utf-8")) as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+})();
 
 // Extended WebSocket type with heartbeat tracking
 interface ExtendedWebSocket extends WebSocket {
@@ -392,6 +402,33 @@ export async function registerRoutes(
     clearInterval(adminHeartbeat);
   });
   
+  app.get("/api/health", async (_req, res) => {
+    const dbStart = Date.now();
+    let dbConnected = false;
+    let dbResponseTimeMs = -1;
+    try {
+      await getPool().query("SELECT 1");
+      dbConnected = true;
+      dbResponseTimeMs = Date.now() - dbStart;
+    } catch {
+      dbResponseTimeMs = Date.now() - dbStart;
+    }
+
+    const customerWebSockets = wss.clients.size;
+    const adminWebSockets = adminWss.clients.size;
+
+    logger.debug("Health check", { source: "health", dbConnected, dbResponseTimeMs, customerWebSockets, adminWebSockets });
+
+    res.json({
+      status: dbConnected ? "ok" : "degraded",
+      timestamp: Date.now(),
+      uptime: process.uptime(),
+      version: VERSION,
+      database: { connected: dbConnected, responseTimeMs: dbResponseTimeMs },
+      connections: { customerWebSockets, adminWebSockets },
+    });
+  });
+
   app.get("/api/vapid-public-key", (req, res) => {
     res.json({ publicKey: vapidKeys.publicKey });
   });
