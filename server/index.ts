@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { runMigrations, closeDb } from "./db";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
@@ -60,6 +61,13 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.error("[DB] Migration failed:", err);
+    process.exit(1);
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -95,4 +103,11 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  const shutdown = async () => {
+    await closeDb();
+    process.exit(0);
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 })();
