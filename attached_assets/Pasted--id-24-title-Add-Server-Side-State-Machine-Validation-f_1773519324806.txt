@@ -1,0 +1,28 @@
+{
+  "id": 24,
+  "title": "Add Server-Side State Machine Validation for Order Status",
+  "priority": "P1-High",
+  "depends_on": [2, 13],
+  "context": "The order status transitions are documented as a state machine but there is no server-side enforcement. Nothing prevents jumping from 'waiting' directly to 'completed'.",
+  "task": "Add server-side validation to enforce valid status transitions and fix the /trigger endpoint Zod validation.",
+  "detailed_instructions": [
+    "Create server/lib/state-machine.ts:",
+    "Define VALID_TRANSITIONS as a Record mapping each status to its allowed next statuses:",
+    "- 'waiting' -> ['subscribed', 'notified']",
+    "- 'subscribed' -> ['scheduled', 'notified']",
+    "- 'scheduled' -> ['notified']",
+    "- 'notified' -> ['completed']",
+    "- 'completed' -> [] (terminal state)",
+    "Export function isValidTransition(from: string, to: string): boolean that checks VALID_TRANSITIONS[from].includes(to).",
+    "Export function assertValidTransition(from: string, to: string): void that throws a ValidationError if transition is invalid, with message: 'Invalid status transition from {from} to {to}. Allowed: {allowedList}'.",
+    "Apply assertValidTransition in storage methods (server/db-storage.ts):",
+    "- updateOrderSubscription: must be coming from 'waiting'",
+    "- updateOrderScheduledTime: must be coming from 'subscribed'",
+    "- markOrderNotified: must be coming from 'subscribed', 'scheduled', or 'waiting'",
+    "- updateOrderStatus: validate the transition generically",
+    "In each method, fetch the current order first, check current status, then call assertValidTransition(currentStatus, newStatus) before performing the update.",
+    "FIX TRIGGER ENDPOINT: In server/routes.ts, the POST /api/orders/:id/trigger endpoint currently extracts message directly from req.body without Zod validation. Change it to validate with: z.object({ message: z.string().max(500).optional() }). Handle Zod errors the same way other endpoints do (return 400 with error details)."
+  ],
+  "replit_note": "State machine validation prevents data corruption from API misuse. The ValidationError integrates with the error handling middleware from Prompt 4.",
+  "testing_checkpoint": "Try to complete a 'waiting' order directly — 400 error with clear message. Normal flow waiting->subscribed->notified->completed works. Trigger endpoint with message > 500 chars returns 400 validation error."
+}

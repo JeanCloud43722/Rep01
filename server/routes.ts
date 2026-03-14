@@ -12,6 +12,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
 import { sanitizeInput } from "./lib/sanitize";
+import { ValidationError } from "./lib/state-machine";
 import { requireAuth } from "./middleware/auth";
 import bcrypt from "bcryptjs";
 
@@ -639,6 +640,9 @@ export async function registerRoutes(
         res.json(order);
       }
     } catch (error) {
+      if (error instanceof ValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: "Failed to register" });
     }
   });
@@ -689,17 +693,29 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid subscription data" });
       }
+      if (error instanceof ValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: "Failed to subscribe" });
     }
   });
 
   app.post("/api/orders/:id/trigger", requireAuth, async (req, res) => {
     try {
-      const rawMessage = req.body?.message;
-      const message = rawMessage ? sanitizeInput(String(rawMessage)) : undefined;
+      const triggerSchema = z.object({
+        message: z.string().max(500).optional()
+      });
+      const parsed = triggerSchema.parse(req.body ?? {});
+      const message = parsed.message ? sanitizeInput(parsed.message) : undefined;
       await sendNotification(req.params.id, message);
       res.json({ success: true });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      if (error instanceof ValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       logger.error("Trigger notification error", { source: "api", orderId: req.params.id, error: (error as Error).message });
       res.status(500).json({ error: "Failed to send notification" });
     }
@@ -815,6 +831,9 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid schedule data" });
       }
+      if (error instanceof ValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: "Failed to schedule notification" });
     }
   });
@@ -890,6 +909,9 @@ export async function registerRoutes(
       logger.info("Order marked as completed", { source: "api", orderId });
       res.json(order);
     } catch (error) {
+      if (error instanceof ValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       logger.error("Failed to complete order", { source: "api", orderId: req.params.id, error });
       res.status(500).json({ error: "Failed to complete order" });
     }

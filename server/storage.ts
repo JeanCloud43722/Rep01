@@ -1,5 +1,6 @@
 import { type Order, type PushSubscriptionData, type Message, type Offer, type ServiceRequest } from "@shared/schema";
 import { randomBytes } from "crypto";
+import { assertValidTransition } from "./lib/state-machine";
 
 function generateOrderId(): string {
   // Generate human-friendly order ID: 3 uppercase letters + 3 digits (e.g., "KMT472")
@@ -98,9 +99,14 @@ export class MemStorage implements IStorage {
   async updateOrderSubscription(id: string, subscription: PushSubscriptionData): Promise<Order | undefined> {
     const order = this.orders.get(id);
     if (!order) return undefined;
-    
+
+    // Only transition to "subscribed" if currently "waiting".
+    // When clearing (null) due to push revocation, preserve the current status.
+    if (subscription !== null && order.status === "waiting") {
+      assertValidTransition(order.status, "subscribed");
+      order.status = "subscribed";
+    }
     order.subscription = subscription;
-    order.status = "subscribed";
     this.orders.set(id, order);
     return order;
   }
@@ -108,7 +114,8 @@ export class MemStorage implements IStorage {
   async updateOrderStatus(id: string, status: Order["status"]): Promise<Order | undefined> {
     const order = this.orders.get(id);
     if (!order) return undefined;
-    
+
+    assertValidTransition(order.status, status);
     order.status = status;
     this.orders.set(id, order);
     return order;
@@ -117,7 +124,8 @@ export class MemStorage implements IStorage {
   async updateOrderScheduledTime(id: string, scheduledTime: string): Promise<Order | undefined> {
     const order = this.orders.get(id);
     if (!order) return undefined;
-    
+
+    assertValidTransition(order.status, "scheduled");
     order.scheduledTime = scheduledTime;
     order.status = "scheduled";
     this.orders.set(id, order);
@@ -127,7 +135,8 @@ export class MemStorage implements IStorage {
   async markOrderNotified(id: string): Promise<Order | undefined> {
     const order = this.orders.get(id);
     if (!order) return undefined;
-    
+
+    assertValidTransition(order.status, "notified");
     order.status = "notified";
     order.notifiedAt = new Date().toISOString();
     this.orders.set(id, order);
