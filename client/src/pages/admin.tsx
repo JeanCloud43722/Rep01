@@ -15,7 +15,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX, LogOut } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut, RotateCcw } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -105,7 +106,8 @@ function OrderCard({
   onAddOffer,
   onEditNotes,
   onSendMessage,
-  onComplete
+  onComplete,
+  onReactivate
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
@@ -116,9 +118,12 @@ function OrderCard({
   onEditNotes: (orderId: string) => void;
   onSendMessage: (orderId: string) => void;
   onComplete: (orderId: string) => void;
+  onReactivate: (orderId: string, resetMessages: boolean) => void;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   const { toast } = useToast();
+  const [reactivateOpen, setReactivateOpen] = useState(false);
+  const [resetMessages, setResetMessages] = useState(false);
 
   const acknowledgeMutation = useMutation({
     mutationFn: ({ orderId, requestId }: { orderId: string; requestId: string }) =>
@@ -137,9 +142,16 @@ function OrderCard({
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="space-y-1">
-            <CardTitle className="font-mono text-lg tracking-wide" data-testid={`text-order-id-${order.id}`}>
-              Order #{formatOrderId(order.id)}
-            </CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <CardTitle className="font-mono text-lg tracking-wide" data-testid={`text-order-id-${order.id}`}>
+                Order #{formatOrderId(order.id)}
+              </CardTitle>
+              {(order.reactivationCount ?? 0) > 0 && (
+                <Badge variant="outline" className="text-xs" data-testid={`badge-round-${order.id}`}>
+                  Round {(order.reactivationCount ?? 0) + 1}
+                </Badge>
+              )}
+            </div>
             <CardDescription className="text-sm">
               {formatDate(order.createdAt)} at {formatTime(order.createdAt)}
             </CardDescription>
@@ -286,6 +298,18 @@ function OrderCard({
               Mark Complete
             </Button>
           )}
+
+          {order.status === "completed" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setResetMessages(false); setReactivateOpen(true); }}
+              data-testid={`button-reactivate-${order.id}`}
+            >
+              <RotateCcw className="h-4 w-4 mr-1" />
+              Reactivate
+            </Button>
+          )}
           
           <Button 
             variant="outline" 
@@ -318,6 +342,44 @@ function OrderCard({
           </Button>
         </div>
       </CardContent>
+
+      <Dialog open={reactivateOpen} onOpenChange={setReactivateOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reactivate Order #{formatOrderId(order.id)}</DialogTitle>
+            <DialogDescription>
+              The QR code will become active again for a new order round.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-3 py-2">
+            <Checkbox
+              id={`reset-messages-${order.id}`}
+              checked={resetMessages}
+              onCheckedChange={(v) => setResetMessages(!!v)}
+              data-testid={`checkbox-reset-messages-${order.id}`}
+            />
+            <Label htmlFor={`reset-messages-${order.id}`} className="text-sm cursor-pointer">
+              Clear message history for this round
+            </Label>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setReactivateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                onReactivate(order.id, resetMessages);
+                setReactivateOpen(false);
+              }}
+              data-testid={`button-confirm-reactivate-${order.id}`}
+            >
+              <RotateCcw className="h-4 w-4 mr-1" />
+              Reactivate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -1035,6 +1097,25 @@ export default function AdminPage() {
       });
     }
   });
+
+  const reactivateOrderMutation = useMutation({
+    mutationFn: ({ orderId, resetMessages }: { orderId: string; resetMessages: boolean }) =>
+      apiRequest("POST", `/api/orders/${orderId}/reactivate`, { resetMessages }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({
+        title: "Order reactivated",
+        description: "QR code is active again for a new round"
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to reactivate order",
+        variant: "destructive"
+      });
+    }
+  });
   
   const triggerMutation = useMutation({
     mutationFn: ({ orderId, message }: { orderId: string; message: string }) => 
@@ -1287,6 +1368,7 @@ export default function AdminPage() {
                     onEditNotes={setNotesOrderId}
                     onSendMessage={setMessageOrderId}
                     onComplete={(id) => completeOrderMutation.mutate(id)}
+                    onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
                   />
                 ))}
               </div>
@@ -1312,6 +1394,7 @@ export default function AdminPage() {
                     onEditNotes={setNotesOrderId}
                     onSendMessage={setMessageOrderId}
                     onComplete={(id) => completeOrderMutation.mutate(id)}
+                    onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
                   />
                 ))}
               </div>

@@ -12,7 +12,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
 import { sanitizeInput } from "./lib/sanitize";
-import { ValidationError } from "./lib/state-machine";
+import { ValidationError, canReactivate } from "./lib/state-machine";
 import { requireAuth } from "./middleware/auth";
 import bcrypt from "bcryptjs";
 
@@ -723,16 +723,43 @@ export async function registerRoutes(
 
   app.post("/api/orders/:id/message", requireAuth, async (req, res) => {
     try {
-      const messageSchema = z.object({
-        message: z.string().min(1).max(200)
+      const msgSchema = z.object({
+        message: z.string().min(1).max(200),
+        scheduledTime: z.string().optional()
       });
       
-      const parsed = messageSchema.parse(req.body);
+      const parsed = msgSchema.parse(req.body);
       const message = sanitizeInput(parsed.message);
       
       const order = await storage.getOrder(req.params.id);
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
+      }
+
+      // If a scheduledTime is provided, handle combined message + schedule
+      if (parsed.scheduledTime) {
+        const scheduledDate = new Date(parsed.scheduledTime);
+        if (scheduledDate <= new Date()) {
+          return res.status(400).json({ error: "Scheduled time must be in the future" });
+        }
+        // Reactivate completed orders before scheduling
+        let targetOrder = order;
+        if (order.status === "completed") {
+          const reactivated = await storage.reactivateOrder(req.params.id, { resetMessages: false });
+          if (!reactivated) return res.status(404).json({ error: "Order not found" });
+          targetOrder = reactivated;
+          logger.info("Reactivated completed order via message+schedule", { source: "message", orderId: req.params.id });
+        }
+        // Cancel any existing scheduled job
+        const existingJob = scheduledJobs.get(req.params.id);
+        if (existingJob) existingJob.cancel();
+        await storage.addMessage(req.params.id, message, "staff");
+        await storage.updateOrderScheduledTime(req.params.id, parsed.scheduledTime);
+        scheduleNotification(req.params.id, scheduledDate, message);
+        notifyOrderUpdate(req.params.id, "status_update");
+        notifyAdminUpdate(req.params.id, "status_update");
+        logger.info("Staff message sent with scheduled follow-up", { source: "message", orderId: req.params.id, scheduledAt: scheduledDate.toISOString() });
+        return res.json({ success: true, scheduled: true });
       }
       
       await storage.addMessage(req.params.id, message, "staff");
@@ -814,6 +841,14 @@ export async function registerRoutes(
       }
       
       logger.info("Schedule request received", { source: "schedule", orderId: req.params.id, scheduledAt: scheduledDate.toISOString(), delaySecs: Math.round((scheduledDate.getTime() - now.getTime()) / 1000) });
+
+      // Reactivate completed orders before scheduling
+      const existing = await storage.getOrder(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Order not found" });
+      if (existing.status === "completed") {
+        await storage.reactivateOrder(req.params.id, { resetMessages: false });
+        logger.info("Reactivated completed order for new scheduling", { source: "schedule", orderId: req.params.id });
+      }
       
       const order = await storage.updateOrderScheduledTime(req.params.id, scheduledTime);
       if (!order) {
@@ -929,6 +964,44 @@ export async function registerRoutes(
       }
       logger.error("Failed to complete order", { source: "api", orderId: req.params.id, error });
       res.status(500).json({ error: "Failed to complete order" });
+    }
+  });
+
+  app.post("/api/orders/:id/reactivate", requireAuth, async (req, res) => {
+    try {
+      const reactivateSchema = z.object({
+        resetMessages: z.boolean().optional().default(false)
+      });
+
+      const { resetMessages } = reactivateSchema.parse(req.body);
+
+      const existing = await storage.getOrder(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Order not found" });
+      if (!canReactivate(existing)) {
+        return res.status(400).json({ error: `Order cannot be reactivated from status '${existing.status}'` });
+      }
+
+      // Cancel any lingering scheduled job
+      const job = scheduledJobs.get(req.params.id);
+      if (job) {
+        job.cancel();
+        scheduledJobs.delete(req.params.id);
+      }
+
+      const order = await storage.reactivateOrder(req.params.id, { resetMessages });
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      notifyOrderUpdate(req.params.id, "order_reactivated");
+      notifyAdminUpdate(req.params.id, "order_reactivated");
+
+      logger.info("Order reactivated", { source: "api", orderId: req.params.id, reactivationCount: order.reactivationCount, resetMessages });
+      res.json(order);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid reactivation data" });
+      }
+      logger.error("Failed to reactivate order", { source: "api", orderId: req.params.id, error });
+      res.status(500).json({ error: "Failed to reactivate order" });
     }
   });
 

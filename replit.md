@@ -49,8 +49,9 @@ MVP complete with all core features:
 | POST | `/api/orders/:id/register` | Auto-register customer (called when they visit) |
 | POST | `/api/orders/:id/subscribe` | Subscribe to push notifications (optional) |
 | POST | `/api/orders/:id/trigger` | Send immediate notification |
-| POST | `/api/orders/:id/message` | Send custom message (without marking order ready) |
-| POST | `/api/orders/:id/schedule` | Schedule future notification |
+| POST | `/api/orders/:id/message` | Send custom message; accepts optional `scheduledTime` to combine message + schedule |
+| POST | `/api/orders/:id/schedule` | Schedule future notification; auto-reactivates completed orders |
+| POST | `/api/orders/:id/reactivate` | Reactivate completed order for a new round (admin only); body: `{ resetMessages?: boolean }` |
 | POST | `/api/orders/:id/service` | Request waiter service |
 | POST | `/api/orders/:id/offers` | Add offer to order |
 | PATCH | `/api/orders/:id/notes` | Update order notes |
@@ -62,6 +63,8 @@ MVP complete with all core features:
 3. **scheduled** - Notification scheduled for future time
 4. **notified** - Customer has been notified
 5. **completed** - Order completed
+
+**Reactivation path**: `completed → waiting` (via `/reactivate` endpoint or auto-triggered by Schedule/Message+scheduledTime). Enables the same QR code to serve multiple order rounds (appetizer → main → dessert). Admin sees "Round N" badge when `reactivationCount > 0`.
 
 ## Key Files
 - `shared/schema.ts` - Data models and Zod schemas

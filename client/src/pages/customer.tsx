@@ -519,6 +519,24 @@ export default function CustomerPage() {
     if (order && orderId) offlineStorage.saveOrder(order).catch(console.warn);
   }, [order, orderId]);
 
+  // Detect reactivation: order was completed, now it's active again
+  const prevStatusRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!order) return;
+    const prev = prevStatusRef.current;
+    const curr = order.status;
+    if (prev === "completed" && curr !== "completed") {
+      const isReset = order.messages.length === 0;
+      toast({
+        title: t("Order reactivated"),
+        description: isReset
+          ? t("New order round started — your QR code is active again")
+          : t("Continuing conversation — your QR code is active again"),
+      });
+    }
+    prevStatusRef.current = curr;
+  }, [order?.status]);
+
   // ── WebSocket via WebSocketManager ──
   useEffect(() => {
     if (!orderId) return;
@@ -529,6 +547,10 @@ export default function CustomerPage() {
         if (msg.type === "order_updated") {
           if (msg.eventType === "order_ready") playBuzzer();
           else if (msg.eventType === "message") playMessageChime();
+          else if (msg.eventType === "order_reactivated") {
+            queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+            queryClient.refetchQueries({ queryKey: ["/api/orders", orderId] });
+          }
           queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
           queryClient.refetchQueries({ queryKey: ["/api/orders", orderId] });
         } else if (msg.type === "sync_response" && msg.order) {

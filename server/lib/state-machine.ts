@@ -3,20 +3,26 @@
  * Enforces valid transitions and prevents data corruption from API misuse.
  */
 
+import type { Order } from "@shared/schema";
+
 export type OrderStatus = "waiting" | "subscribed" | "scheduled" | "notified" | "completed";
 
 export const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  waiting:   ["subscribed", "notified"],
+  waiting:    ["subscribed", "notified", "scheduled"],
   subscribed: ["scheduled", "notified"],
-  scheduled: ["notified"],
-  notified:  ["completed"],
-  completed: [],
+  scheduled:  ["notified"],
+  notified:   ["completed"],
+  completed:  ["waiting", "subscribed"],
 };
 
 export function isValidTransition(from: string, to: string): boolean {
   const allowed = VALID_TRANSITIONS[from as OrderStatus];
   if (!allowed) return false;
   return allowed.includes(to as OrderStatus);
+}
+
+export function canReactivate(order: Order): boolean {
+  return order.status === "completed";
 }
 
 export class ValidationError extends Error {

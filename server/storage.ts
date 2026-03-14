@@ -40,6 +40,7 @@ export interface IStorage {
   addServiceRequest(id: string): Promise<Order | undefined>;
   acknowledgeServiceRequest(orderId: string, requestId: string): Promise<Order | undefined>;
   updateOrderNotes(id: string, notes: string): Promise<Order | undefined>;
+  reactivateOrder(id: string, options: { resetMessages: boolean }): Promise<Order | undefined>;
   deleteCompletedOrdersOlderThan(hours: number): Promise<number>;
 }
 
@@ -91,7 +92,9 @@ export class MemStorage implements IStorage {
       messages: [],
       offers: [],
       serviceRequests: [],
-      notes: ""
+      notes: "",
+      reactivationCount: 0,
+      lastReactivatedAt: null
     };
     this.orders.set(id, order);
     return order;
@@ -214,15 +217,43 @@ export class MemStorage implements IStorage {
     return order;
   }
 
+  async reactivateOrder(id: string, options: { resetMessages: boolean }): Promise<Order | undefined> {
+    const order = this.orders.get(id);
+    if (!order) return undefined;
+
+    order.status = "waiting";
+    order.notifiedAt = null;
+    order.scheduledTime = null;
+    order.reactivationCount = (order.reactivationCount ?? 0) + 1;
+    order.lastReactivatedAt = new Date().toISOString();
+
+    if (options.resetMessages) {
+      order.messages = [];
+      order.serviceRequests = [];
+      order.offers = [];
+    }
+
+    this.orders.set(id, order);
+    return order;
+  }
+
   async deleteCompletedOrdersOlderThan(hours: number): Promise<number> {
     const threshold = new Date(Date.now() - hours * 3600000);
+    const reactivationGrace = new Date(Date.now() - 7 * 24 * 3600000); // 7 days
     let count = 0;
     const idsToDelete: string[] = [];
     
     this.orders.forEach((order, id) => {
-      if (order.status === "completed" && order.notifiedAt && new Date(order.notifiedAt) < threshold) {
-        idsToDelete.push(id);
-      }
+      if (order.status !== "completed") return;
+      if (!order.notifiedAt) return;
+      if (new Date(order.notifiedAt) >= threshold) return;
+      // Preserve recently reactivated orders for 7 days
+      if (
+        order.reactivationCount > 0 &&
+        order.lastReactivatedAt &&
+        new Date(order.lastReactivatedAt) >= reactivationGrace
+      ) return;
+      idsToDelete.push(id);
     });
     
     idsToDelete.forEach(id => {

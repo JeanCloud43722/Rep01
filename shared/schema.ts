@@ -69,7 +69,9 @@ export const orderSchema = z.object({
   messages: z.array(messageSchema),
   offers: z.array(offerSchema),
   serviceRequests: z.array(serviceRequestSchema),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  reactivationCount: z.number().default(0),
+  lastReactivatedAt: z.string().nullable().default(null)
 });
 
 export type Order = z.infer<typeof orderSchema>;
