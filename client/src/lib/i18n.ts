@@ -33,6 +33,8 @@ const resources = {
       'card.calling': 'Calling Waiter...',
       'card.waiter_help': 'Staff will come to your table',
       'card.ready_at': 'Ready at',
+      'card.service_waiting': 'Request sent — waiting for staff',
+      'card.service_acknowledged': 'Staff notified',
 
       // Message thread
       'chat.title': 'Chat with Staff',
@@ -98,6 +100,8 @@ const resources = {
       'card.calling': 'Rufe Kellner...',
       'card.waiter_help': 'Das Personal kommt zu Ihrem Tisch',
       'card.ready_at': 'Fertig um',
+      'card.service_waiting': 'Anfrage gesendet — warte auf Personal',
+      'card.service_acknowledged': 'Personal benachrichtigt',
 
       // Message thread
       'chat.title': 'Chat mit Personal',

@@ -53,7 +53,8 @@ export type Offer = z.infer<typeof offerSchema>;
 
 export const serviceRequestSchema = z.object({
   id: z.string(),
-  requestedAt: z.string()
+  requestedAt: z.string(),
+  acknowledgedAt: z.string().nullable()
 });
 
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;

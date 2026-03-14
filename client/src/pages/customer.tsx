@@ -132,18 +132,52 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
             <Check className="h-4 w-4" />
             <span>{t('card.auto_update')}</span>
           </div>
-          <Button
-            variant="destructive"
-            size="lg"
-            onClick={onRequestService}
-            disabled={isRequestingService}
-            className="w-full max-w-xs"
-            aria-describedby="waiter-help"
-          >
-            {isRequestingService ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <AlertCircle className="h-5 w-5 mr-2" />}
-            {isRequestingService ? t('card.calling') : t('card.call_waiter')}
-          </Button>
-          <p id="waiter-help" className="text-xs text-muted-foreground">{t('card.waiter_help')}</p>
+          {(() => {
+            const latestRequest = order.serviceRequests.length > 0
+              ? [...order.serviceRequests].sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())[0]
+              : null;
+            if (latestRequest && latestRequest.acknowledgedAt === null) {
+              return (
+                <div className="flex flex-col items-center gap-2 w-full max-w-xs" data-testid="service-request-status">
+                  <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-md px-4 py-2.5 w-full justify-center">
+                    <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+                    </span>
+                    <span className="font-medium">{t('card.service_waiting')}</span>
+                  </div>
+                </div>
+              );
+            }
+            if (latestRequest && latestRequest.acknowledgedAt !== null) {
+              return (
+                <div className="flex flex-col items-center gap-2 w-full max-w-xs" data-testid="service-request-status">
+                  <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-md px-4 py-2.5 w-full justify-center">
+                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                    <span className="font-medium">{t('card.service_acknowledged')}</span>
+                    <span className="text-xs text-muted-foreground">{formatRelativeTime(latestRequest.acknowledgedAt, t)}</span>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <>
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  onClick={onRequestService}
+                  disabled={isRequestingService}
+                  className="w-full max-w-xs"
+                  aria-describedby="waiter-help"
+                  data-testid="button-call-waiter"
+                >
+                  {isRequestingService ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <AlertCircle className="h-5 w-5 mr-2" />}
+                  {isRequestingService ? t('card.calling') : t('card.call_waiter')}
+                </Button>
+                <p id="waiter-help" className="text-xs text-muted-foreground">{t('card.waiter_help')}</p>
+              </>
+            );
+          })()}
         </div>
       </CardContent>
     </Card>

@@ -38,6 +38,7 @@ export interface IStorage {
   addMessage(id: string, message: string, sender: "staff" | "customer"): Promise<Order | undefined>;
   addOffer(id: string, title: string, description: string): Promise<Order | undefined>;
   addServiceRequest(id: string): Promise<Order | undefined>;
+  acknowledgeServiceRequest(orderId: string, requestId: string): Promise<Order | undefined>;
   updateOrderNotes(id: string, notes: string): Promise<Order | undefined>;
   deleteCompletedOrdersOlderThan(hours: number): Promise<number>;
 }
@@ -181,11 +182,22 @@ export class MemStorage implements IStorage {
     
     const serviceRequest: ServiceRequest = {
       id: generateShortId(),
-      requestedAt: new Date().toISOString()
+      requestedAt: new Date().toISOString(),
+      acknowledgedAt: null
     };
     
     order.serviceRequests.push(serviceRequest);
     this.orders.set(id, order);
+    return order;
+  }
+
+  async acknowledgeServiceRequest(orderId: string, requestId: string): Promise<Order | undefined> {
+    const order = this.orders.get(orderId);
+    if (!order) return undefined;
+    const request = order.serviceRequests.find(r => r.id === requestId);
+    if (!request) return undefined;
+    request.acknowledgedAt = new Date().toISOString();
+    this.orders.set(orderId, order);
     return order;
   }
 

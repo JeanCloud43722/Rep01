@@ -87,6 +87,14 @@ function formatDate(isoString: string) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function timeAgo(isoString: string): string {
+  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
 
 function OrderCard({ 
   order, 
@@ -110,7 +118,20 @@ function OrderCard({
   onComplete: (orderId: string) => void;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
-  
+  const { toast } = useToast();
+
+  const acknowledgeMutation = useMutation({
+    mutationFn: ({ orderId, requestId }: { orderId: string; requestId: string }) =>
+      apiRequest("POST", `/api/orders/${orderId}/service/${requestId}/acknowledge`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Service request acknowledged" });
+    },
+    onError: () => {
+      toast({ title: "Failed to acknowledge", variant: "destructive" });
+    }
+  });
+
   return (
     <Card className="hover-elevate transition-all duration-200">
       <CardHeader className="pb-3">
@@ -135,9 +156,37 @@ function OrderCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {order.serviceRequests.length > 0 && (
-          <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 border border-destructive/30">
-            <Wrench className="h-4 w-4 flex-shrink-0" />
-            <span className="font-medium">Service Requested ({order.serviceRequests.length})</span>
+          <div className="space-y-1.5">
+            {order.serviceRequests.map((req) =>
+              req.acknowledgedAt === null ? (
+                <div key={req.id} className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2" data-testid={`service-request-${req.id}`}>
+                  <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-destructive" />
+                  </span>
+                  <Wrench className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span className="font-medium flex-1">Service Request</span>
+                  <span className="text-xs text-muted-foreground">{timeAgo(req.requestedAt)}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs shrink-0 ml-1"
+                    onClick={() => acknowledgeMutation.mutate({ orderId: order.id, requestId: req.id })}
+                    disabled={acknowledgeMutation.isPending}
+                    data-testid={`button-acknowledge-${req.id}`}
+                  >
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    Acknowledge
+                  </Button>
+                </div>
+              ) : (
+                <div key={req.id} className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-md px-3 py-2" data-testid={`service-request-${req.id}`}>
+                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                  <span className="flex-1">Service Request</span>
+                  <span className="text-xs text-muted-foreground">Acknowledged {timeAgo(req.acknowledgedAt)}</span>
+                </div>
+              )
+            )}
           </div>
         )}
 

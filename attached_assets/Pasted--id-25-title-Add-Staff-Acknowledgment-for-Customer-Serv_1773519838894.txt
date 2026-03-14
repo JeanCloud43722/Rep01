@@ -1,0 +1,30 @@
+{
+  "id": 25,
+  "title": "Add Staff Acknowledgment for Customer Service Requests",
+  "priority": "P2-Medium",
+  "depends_on": [2, 6],
+  "context": "Customers press 'Call Waiter' but have zero feedback that staff saw the request. This is a significant UX gap.",
+  "task": "Add a staff acknowledgment system for service requests so customers can see their request was noticed.",
+  "detailed_instructions": [
+    "SCHEMA CHANGE: In the serviceRequestSchema in shared/schema.ts, add: acknowledgedAt: z.string().nullable() (ISO 8601 timestamp, null when unacknowledged). Default to null.",
+    "If using JSONB column for serviceRequests in PostgreSQL (Prompt 1), the schema change is automatic — no migration needed since JSONB is schemaless.",
+    "STORAGE METHOD: Add to IStorage interface: acknowledgeServiceRequest(orderId: string, requestId: string): Promise<Order | undefined>.",
+    "Implementation: fetch order, find service request by requestId in the serviceRequests array, set acknowledgedAt to new Date().toISOString(), save order back, return updated Order.",
+    "API ENDPOINT: Add POST /api/orders/:id/service/:requestId/acknowledge in server/routes.ts.",
+    "- Protected by requireAuth middleware (admin only).",
+    "- Calls storage.acknowledgeServiceRequest(orderId, requestId).",
+    "- Returns 404 if order or service request not found.",
+    "- Fire notifyOrderUpdate(id, 'status_update') and notifyAdminUpdate(id, 'status_update').",
+    "- Return updated Order.",
+    "ADMIN UI: In admin.tsx order cards, update the service request display:",
+    "- Unacknowledged requests (acknowledgedAt === null): red background, pulsing animation, 'Acknowledge' button (CheckCircle icon).",
+    "- Clicking 'Acknowledge' calls the new endpoint, shows success toast.",
+    "- Acknowledged requests: green checkmark icon + relative time of acknowledgment ('Acknowledged 2m ago').",
+    "CUSTOMER UI: In customer.tsx, after pressing 'Call Waiter', show the request status inline:",
+    "- If latest service request has acknowledgedAt === null: pulsing amber dot + 'Request sent — waiting for staff'.",
+    "- If acknowledgedAt is set: green checkmark + 'Staff notified' with relative time.",
+    "- If no service requests: show the 'Call Waiter' button normally."
+  ],
+  "replit_note": "This closes a significant UX gap. Test the full flow: customer calls waiter → admin sees alert → admin acknowledges → customer sees confirmation.",
+  "testing_checkpoint": "Customer presses Call Waiter — sees 'waiting for staff' with pulsing dot. Admin sees red alert, clicks Acknowledge. Customer immediately sees 'Staff notified ✓'. Multiple service requests tracked independently."
+}

@@ -884,6 +884,21 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/:id/service/:requestId/acknowledge", requireAuth, async (req, res) => {
+    try {
+      const { id, requestId } = req.params;
+      const order = await storage.acknowledgeServiceRequest(id, requestId);
+      if (!order) {
+        return res.status(404).json({ error: "Order or service request not found" });
+      }
+      notifyOrderUpdate(id, "status_update");
+      notifyAdminUpdate(id, "status_update");
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to acknowledge service request" });
+    }
+  });
+
   app.post("/api/orders/:id/complete", requireAuth, async (req, res) => {
     try {
       const orderId = req.params.id;
