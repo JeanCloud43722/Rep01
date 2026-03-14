@@ -5,6 +5,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { audioManager } from "@/lib/audio-manager";
 import { useAdminWebSocket } from "@/hooks/use-admin-websocket";
+import { formatOrderId } from "@/lib/format-utils";
 import type { Order } from "@shared/schema";
 
 import { Button } from "@/components/ui/button";
@@ -116,7 +117,7 @@ function OrderCard({
         <div className="flex items-start justify-between gap-2">
           <div className="space-y-1">
             <CardTitle className="font-mono text-lg tracking-wide" data-testid={`text-order-id-${order.id}`}>
-              #{order.id}
+              Order #{formatOrderId(order.id)}
             </CardTitle>
             <CardDescription className="text-sm">
               {formatDate(order.createdAt)} at {formatTime(order.createdAt)}

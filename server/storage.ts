@@ -1,7 +1,26 @@
 import { type Order, type PushSubscriptionData, type Message, type Offer, type ServiceRequest } from "@shared/schema";
 import { randomBytes } from "crypto";
 
+function generateOrderId(): string {
+  // Generate human-friendly order ID: 3 uppercase letters + 3 digits (e.g., "KMT472")
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const digits = "0123456789";
+  let id = "";
+  
+  // 3 random letters
+  for (let i = 0; i < 3; i++) {
+    id += letters[Math.floor(Math.random() * letters.length)];
+  }
+  // 3 random digits
+  for (let i = 0; i < 3; i++) {
+    id += digits[Math.floor(Math.random() * digits.length)];
+  }
+  
+  return id;
+}
+
 function generateShortId(): string {
+  // Used for sub-entity IDs (messages, offers, service requests) — never shown to users
   return randomBytes(4).toString("hex");
 }
 
@@ -49,7 +68,12 @@ export class MemStorage implements IStorage {
   }
 
   async createOrder(): Promise<Order> {
-    const id = generateShortId();
+    let id = generateOrderId();
+    // Collision check: retry up to 10 times if ID already exists
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (!this.orders.has(id)) break;
+      id = generateOrderId();
+    }
     const order: Order = {
       id,
       createdAt: new Date().toISOString(),

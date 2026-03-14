@@ -5,6 +5,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { audioManager } from "@/lib/audio-manager";
 import { offlineStorage } from "@/lib/indexed-db-storage";
 import { createWebSocketManager } from "@/lib/websocket-manager";
+import { formatOrderId } from "@/lib/format-utils";
 import type { Order } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -505,7 +506,7 @@ export default function CustomerPage() {
         {/* Header */}
         <div className="text-center space-y-1">
           <Badge variant="outline" className="font-mono text-sm px-3 py-1">
-            Order #{order.id.slice(0, 8).toUpperCase()}
+            Order #{formatOrderId(order.id)}
           </Badge>
           <h1 className="text-3xl font-bold tracking-tight">Digital Buzzer</h1>
           <p className="text-sm text-muted-foreground">We'll notify you the moment your order is ready.</p>
