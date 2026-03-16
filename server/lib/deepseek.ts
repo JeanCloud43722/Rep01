@@ -14,18 +14,12 @@ interface CacheEntry {
 
 const suggestionCache = new Map<string, CacheEntry>();
 
-function buildCacheKey(
-  orderId: string,
-  messages: Array<{ text: string; sender: string }>,
-  language: string
-): string {
+function buildCacheKey(orderId: string, messages: Array<{ text: string; sender: string }>): string {
   const normalized = messages
     .slice(-MAX_MESSAGES)
     .map((m) => `${m.sender}:${m.text.slice(0, MAX_MESSAGE_LENGTH)}`)
     .join("|");
-  return createHash("sha256")
-    .update(`${orderId}:${normalized}:${language}`)
-    .digest("hex");
+  return createHash("sha256").update(`${orderId}:${normalized}`).digest("hex");
 }
 
 function truncateMessages(messages: Array<{ text: string; sender: string; sentAt: string }>) {
@@ -36,51 +30,17 @@ function truncateMessages(messages: Array<{ text: string; sender: string; sentAt
   }));
 }
 
-function detectLanguage(text: string): string {
-  const germanKeywords = [
-    "danke",
-    "bitte",
-    "hallo",
-    "guten",
-    "morgen",
-    "abend",
-    "tag",
-    "ja",
-    "nein",
-    "wie",
-    "geht",
-    "dir",
-    "euch",
-    "ihnen",
-    "können",
-    "möchte",
-    "würde",
-  ];
-  const lowerText = text.toLowerCase();
-  const germanMatches = germanKeywords.filter((kw) => lowerText.includes(kw)).length;
-  return germanMatches >= 2 ? "de" : "en";
-}
-
-function buildPrompt(
-  messages: Array<{ text: string; sender: string }>,
-  language: string = "en"
-): string {
+function buildPrompt(messages: Array<{ text: string; sender: string }>): string {
   const history = messages
     .map((m) => `${m.sender === "staff" ? "Staff" : "Customer"}: ${m.text}`)
     .join("\n");
 
-  const langInstruction =
-    language === "de"
-      ? "Antworte auf Deutsch."
-      : "Reply in English.";
-
-  return `You are a helpful restaurant staff assistant. Based on this conversation, suggest a short, friendly reply from the staff to the customer. Keep it under 100 characters. ${langInstruction} Reply with ONLY the suggested message text, nothing else.\n\nConversation:\n${history}\n\nSuggested staff reply:`;
+  return `You are a helpful restaurant staff assistant. Based on this conversation, suggest a short, friendly reply from the staff to the customer. Keep it under 100 characters. Reply with ONLY the suggested message text, nothing else.\n\nConversation:\n${history}\n\nSuggested staff reply:`;
 }
 
 export async function getReplySuggestion(
   orderId: string,
-  messageHistory: Array<{ text: string; sender: string; sentAt: string }>,
-  language?: string
+  messageHistory: Array<{ text: string; sender: string; sentAt: string }>
 ): Promise<string> {
   const config = getConfig();
   const apiKey = config.deepseekApiKey;
@@ -90,36 +50,17 @@ export async function getReplySuggestion(
   }
 
   const truncated = truncateMessages(messageHistory);
-  
-  // Auto-detect language from the last customer message if not provided
-  let detectedLanguage = language || "en";
-  if (!language) {
-    const lastCustomerMsg = [...truncated].reverse().find((m) => m.sender === "customer");
-    if (lastCustomerMsg) {
-      detectedLanguage = detectLanguage(lastCustomerMsg.text);
-    }
-  }
-
-  const cacheKey = buildCacheKey(orderId, truncated, detectedLanguage);
+  const cacheKey = buildCacheKey(orderId, truncated);
 
   const cached = suggestionCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    logger.info("AI suggestion served from cache", {
-      source: "deepseek",
-      orderId,
-      language: detectedLanguage,
-    });
+    logger.info("AI suggestion served from cache", { source: "deepseek", orderId });
     return cached.suggestion;
   }
 
-  const prompt = buildPrompt(truncated, detectedLanguage);
+  const prompt = buildPrompt(truncated);
 
-  logger.info("Requesting AI reply suggestion", {
-    source: "deepseek",
-    orderId,
-    messageCount: truncated.length,
-    language: detectedLanguage,
-  });
+  logger.info("Requesting AI reply suggestion", { source: "deepseek", orderId, messageCount: truncated.length });
 
   const response = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
@@ -151,7 +92,7 @@ export async function getReplySuggestion(
   }
 
   suggestionCache.set(cacheKey, { suggestion, timestamp: Date.now() });
-  logger.info("AI suggestion cached", { source: "deepseek", orderId, language: detectedLanguage });
+  logger.info("AI suggestion cached", { source: "deepseek", orderId });
 
   return suggestion;
 }
