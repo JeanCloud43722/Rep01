@@ -35,7 +35,13 @@ function buildPrompt(messages: Array<{ text: string; sender: string }>): string 
     .map((m) => `${m.sender === "staff" ? "Staff" : "Customer"}: ${m.text}`)
     .join("\n");
 
-  return `You are a helpful restaurant staff assistant. Based on this conversation, suggest a short, friendly reply from the staff to the customer. Keep it under 100 characters. Reply with ONLY the suggested message text, nothing else.\n\nConversation:\n${history}\n\nSuggested staff reply:`;
+  // Find the last customer message to infer language
+  const lastCustomerMessage = [...messages].reverse().find((m) => m.sender === "customer")?.text;
+  const languageHint = lastCustomerMessage
+    ? `Respond in the same language as the customer's last message.`
+    : "";
+
+  return `You are a helpful restaurant staff assistant. Based on this conversation, suggest a short, friendly reply from the staff to the customer. Keep it under 100 characters. ${languageHint} Reply with ONLY the suggested message text, nothing else.\n\nConversation:\n${history}\n\nSuggested staff reply:`;
 }
 
 export async function getReplySuggestion(
