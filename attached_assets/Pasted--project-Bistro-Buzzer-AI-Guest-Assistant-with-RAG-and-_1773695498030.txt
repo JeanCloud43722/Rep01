@@ -1,0 +1,171 @@
+{
+  "project": "Bistro Buzzer – AI Guest Assistant with RAG and Web Search (DeepSeek AI)",
+  "version": "2.0",
+  "description": "Implement a high-efficiency AI system that answers guest questions about menu items, ingredients, allergens, parking, events, and more. The system uses a knowledge base folder containing PDFs, DOCX, and other documents (menus, supplier lists, event info, parking details), processes them using RAG (Retrieval-Augmented Generation) for fast access, and optionally performs web search for real-time information like calorie counts. Built with DeepSeek AI, optimized for token efficiency, and integrated into the existing Bistro Buzzer architecture.",
+  "instructions": [
+    {
+      "step": 1,
+      "title": "Create knowledge base folder structure",
+      "details": "Create a dedicated folder `/knowledge-base` in the project root to store all source documents. Organize subfolders by category for easier management and metadata tagging.",
+      "files": [
+        {
+          "path": "knowledge-base/README.md",
+          "action": "create",
+          "content": "# Knowledge Base for AI Guest Assistant\n\nPlace your restaurant's documents here. Supported formats: PDF, DOCX, TXT, MD.\n\n## Recommended structure\n\n- `/menus` – current menu PDFs, daily specials, wine lists\n- `/ingredients` – allergen information, ingredient lists, nutritional facts\n- `/suppliers` – supplier catalogs, sourcing info\n- `/events` – event schedules, private dining info, catering\n- `/facilities` – parking instructions, location map, accessibility\n- `/policies` – reservation policy, cancellation terms\n\nFiles uploaded here will be automatically processed and indexed for AI问答."
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "title": "Install required dependencies",
+      "details": "Add necessary packages for document processing, vector storage, and web search.",
+      "command": "npm install @langchain/community @langchain/core @langchain/textsplitters pdf-parse mammoth chromadb @xenova/transformers node-fetch cheerio axios express-rate-limit",
+      "dependencies": [
+        "@langchain/community@^0.0.20",
+        "@langchain/core@^0.1.30",
+        "@langchain/textsplitters@^0.0.20",
+        "pdf-parse@^1.1.1",
+        "mammoth@^1.6.0",
+        "chromadb@^1.8.0",
+        "@xenova/transformers@^2.15.0",
+        "node-fetch@^3.3.2",
+        "cheerio@^1.0.0-rc.12",
+        "axios@^1.6.2",
+        "express-rate-limit@^6.0.0"
+      ]
+    },
+    {
+      "step": 3,
+      "title": "Add environment variables",
+      "details": "Extend `server/env-validation.ts` with new environment variables for the knowledge base and web search features.",
+      "files": [
+        {
+          "path": "server/env-validation.ts",
+          "action": "modify",
+          "content": "// Add to optionalEnvVars array\nexport const optionalEnvVars = [\n  'DEEPSEEK_API_KEY',\n  'VAPID_PUBLIC_KEY',\n  'VAPID_PRIVATE_KEY',\n  'SERPAPI_API_KEY',      // For web search (optional)\n  'GOOGLE_SEARCH_API_KEY', // Alternative\n  'GOOGLE_SEARCH_ENGINE_ID',\n  'KNOWLEDGE_BASE_PATH',   // Path to knowledge base folder (default: './knowledge-base')\n  // ...\n] as const;\n\n// Add warning if web search keys missing but feature enabled\nif (process.env.ENABLE_WEB_SEARCH === 'true' && !process.env.SERPAPI_API_KEY && !process.env.GOOGLE_SEARCH_API_KEY) {\n  logger.warn('Web search enabled but no search API key found. Please set SERPAPI_API_KEY or GOOGLE_SEARCH_API_KEY');\n}\n"
+        },
+        {
+          "path": "README.md",
+          "action": "modify",
+          "content": "| Variable | Required | Default | Description |\n|----------|----------|---------|-------------|\n| `SERPAPI_API_KEY` | Optional | – | API key for SerpApi (web search). Get one at https://serpapi.com/ |\n| `GOOGLE_SEARCH_API_KEY` | Optional | – | Google Custom Search JSON API key |\n| `GOOGLE_SEARCH_ENGINE_ID` | Optional | – | Google Custom Search Engine ID |\n| `KNOWLEDGE_BASE_PATH` | Optional | `./knowledge-base` | Path to the folder containing documents for RAG |\n| `ENABLE_WEB_SEARCH` | Optional | `false` | Set to 'true' to enable real-time web search fallback |\n"
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "title": "Create document processing service",
+      "details": "Build a service that extracts text from various document formats, splits them into chunks, generates embeddings, and stores them in a vector database. Use local embedding models to avoid API costs and ensure privacy.",
+      "files": [
+        {
+          "path": "server/lib/knowledge-base/processor.ts",
+          "action": "create",
+          "content": "import fs from 'fs/promises';\nimport path from 'path';\nimport pdfParse from 'pdf-parse';\nimport mammoth from 'mammoth';\nimport { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';\nimport { pipeline } from '@xenova/transformers';\nimport { ChromaClient, OpenAIEmbeddingFunction } from 'chromadb';\nimport { logger } from '../logger';\n\n// Configuration\nconst CHUNK_SIZE = 500;\nconst CHUNK_OVERLAP = 50;\nconst EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2'; // Lightweight, runs locally\nconst COLLECTION_NAME = 'restaurant_knowledge';\n\n// Initialize embedding pipeline (local, no API call)\nlet embedder: any = null;\nasync function getEmbedder() {\n  if (!embedder) {\n    embedder = await pipeline('feature-extraction', EMBEDDING_MODEL);\n  }\n  return embedder;\n}\n\n// ChromaDB client\nconst chroma = new ChromaClient({ path: 'http://localhost:8000' }); // or use local persistence\n\ninterface DocumentChunk {\n  text: string;\n  metadata: {\n    source: string;\n    category: string;\n    page?: number;\n    chunkIndex: number;\n  };\n}\n\n// Extract text from PDF\nexport async function extractFromPDF(filePath: string): Promise<string> {\n  const dataBuffer = await fs.readFile(filePath);\n  const data = await pdfParse(dataBuffer);\n  return data.text;\n}\n\n// Extract text from DOCX\nexport async function extractFromDOCX(filePath: string): Promise<string> {\n  const buffer = await fs.readFile(filePath);\n  const result = await mammoth.extractRawText({ buffer });\n  return result.value;\n}\n\n// Extract text from TXT/MD\nexport async function extractFromText(filePath: string): Promise<string> {\n  return await fs.readFile(filePath, 'utf-8');\n}\n\n// Main processor: scans knowledge base folder, processes all documents\nexport async function processKnowledgeBase(kbPath: string = './knowledge-base') {\n  logger.info(`Processing knowledge base at ${kbPath}`);\n  \n  // Find all files recursively\n  const files: string[] = [];\n  async function walk(dir: string) {\n    const entries = await fs.readdir(dir, { withFileTypes: true });\n    for (const entry of entries) {\n      const fullPath = path.join(dir, entry.name);\n      if (entry.isDirectory()) {\n        await walk(fullPath);\n      } else {\n        files.push(fullPath);\n      }\n    }\n  }\n  await walk(kbPath);\n\n  logger.info(`Found ${files.length} files to process`);\n\n  const allChunks: DocumentChunk[] = [];\n\n  for (const file of files) {\n    try {\n      const ext = path.extname(file).toLowerCase();\n      let text = '';\n      \n      if (ext === '.pdf') {\n        text = await extractFromPDF(file);\n      } else if (ext === '.docx') {\n        text = await extractFromDOCX(file);\n      } else if (ext === '.txt' || ext === '.md') {\n        text = await extractFromText(file);\n      } else {\n        logger.warn(`Unsupported file type: ${file}`);\n        continue;\n      }\n\n      // Determine category from folder name\n      const relativePath = path.relative(kbPath, file);\n      const category = relativePath.split(path.sep)[0] || 'uncategorized';\n\n      // Split into chunks\n      const splitter = new RecursiveCharacterTextSplitter({\n        chunkSize: CHUNK_SIZE,\n        chunkOverlap: CHUNK_OVERLAP,\n      });\n      const chunks = await splitter.splitText(text);\n\n      chunks.forEach((chunk, idx) => {\n        allChunks.push({\n          text: chunk,\n          metadata: {\n            source: relativePath,\n            category,\n            chunkIndex: idx,\n          },\n        });\n      });\n\n      logger.debug(`Processed ${file}: ${chunks.length} chunks`);\n    } catch (error) {\n      logger.error({ error, file }, 'Failed to process file');\n    }\n  }\n\n  // Generate embeddings and store in ChromaDB\n  const embedFn = await getEmbedder();\n  \n  // Create collection if not exists\n  let collection;\n  try {\n    collection = await chroma.getOrCreateCollection({ name: COLLECTION_NAME });\n  } catch (e) {\n    // If ChromaDB not running, fallback to in-memory with file persistence\n    logger.warn('ChromaDB not available, using in-memory fallback');\n    // For production, you'd set up ChromaDB properly\n    return allChunks; // Return chunks for in-memory usage\n  }\n\n  // Add documents in batches\n  const batchSize = 100;\n  for (let i = 0; i < allChunks.length; i += batchSize) {\n    const batch = allChunks.slice(i, i + batchSize);\n    const embeddings = await Promise.all(\n      batch.map(async chunk => {\n        const result = await embedFn(chunk.text, { pooling: 'mean', normalize: true });\n        return Array.from(result.data);\n      })\n    );\n\n    await collection.add({\n      ids: batch.map((_, idx) => `${i + idx}`),\n      embeddings,\n      metadatas: batch.map(c => c.metadata),\n      documents: batch.map(c => c.text),\n    });\n  }\n\n  logger.info(`Knowledge base processing complete. ${allChunks.length} chunks stored.`);\n  return allChunks;\n}\n\n// Run processor if called directly\nif (require.main === module) {\n  const kbPath = process.env.KNOWLEDGE_BASE_PATH || './knowledge-base';\n  processKnowledgeBase(kbPath).catch(console.error);\n}\n"
+        }
+      ]
+    },
+    {
+      "step": 5,
+      "title": "Create knowledge base retriever service",
+      "details": "Build a service that takes a user question, embeds it, retrieves relevant chunks from the vector store, and returns them with metadata.",
+      "files": [
+        {
+          "path": "server/lib/knowledge-base/retriever.ts",
+          "action": "create",
+          "content": "import { pipeline } from '@xenova/transformers';\nimport { ChromaClient } from 'chromadb';\nimport { logger } from '../logger';\n\nconst COLLECTION_NAME = 'restaurant_knowledge';\nconst TOP_K = 5; // Number of relevant chunks to retrieve\n\nlet embedder: any = null;\nasync function getEmbedder() {\n  if (!embedder) {\n    embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');\n  }\n  return embedder;\n}\n\nlet collection: any = null;\nasync function getCollection() {\n  if (collection) return collection;\n  try {\n    const chroma = new ChromaClient({ path: 'http://localhost:8000' });\n    collection = await chroma.getCollection({ name: COLLECTION_NAME });\n  } catch (e) {\n    logger.warn('ChromaDB not available, using in-memory fallback');\n    // In production, implement proper fallback\n    return null;\n  }\n  return collection;\n}\n\n// In-memory cache for chunks if ChromaDB not available\nlet inMemoryChunks: any[] = [];\nexport function setInMemoryChunks(chunks: any[]) {\n  inMemoryChunks = chunks;\n}\n\n// Simple cosine similarity for in-memory fallback\nfunction cosineSimilarity(a: number[], b: number[]): number {\n  const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);\n  const normA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));\n  const normB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));\n  return dot / (normA * normB);\n}\n\nexport async function retrieveRelevantChunks(query: string): Promise<Array<{ text: string; metadata: any; score: number }>> {\n  const embedFn = await getEmbedder();\n  const queryEmbedding = await embedFn(query, { pooling: 'mean', normalize: true });\n  const queryVector = Array.from(queryEmbedding.data);\n\n  // Try ChromaDB first\n  const col = await getCollection();\n  if (col) {\n    const results = await col.query({\n      queryEmbeddings: [queryVector],\n      nResults: TOP_K,\n    });\n    \n    return results.documents[0].map((doc: string, idx: number) => ({\n      text: doc,\n      metadata: results.metadatas[0][idx],\n      score: results.distances[0][idx],\n    }));\n  }\n\n  // Fallback: in-memory search (simplified)\n  if (inMemoryChunks.length > 0) {\n    // This is a placeholder – in production you'd have a proper vector search\n    // For now, return top chunks based on simple keyword matching\n    const words = query.toLowerCase().split(/\\s+/);\n    const scored = inMemoryChunks.map(chunk => {\n      const text = chunk.text.toLowerCase();\n      const score = words.filter(w => text.includes(w)).length / words.length;\n      return { ...chunk, score };\n    });\n    return scored\n      .filter(c => c.score > 0)\n      .sort((a, b) => b.score - a.score)\n      .slice(0, TOP_K);\n  }\n\n  return [];\n}\n"
+        }
+      ]
+    },
+    {
+      "step": 6,
+      "title": "Create web search service",
+      "details": "Implement a service that performs web searches using SerpApi or Google Custom Search to fetch real-time information like calorie counts, opening hours, or current events.",
+      "files": [
+        {
+          "path": "server/lib/web-search.ts",
+          "action": "create",
+          "content": "import axios from 'axios';\nimport { logger } from './logger';\n\ninterface SearchResult {\n  title: string;\n  snippet: string;\n  link: string;\n}\n\nexport async function webSearch(query: string, numResults: number = 3): Promise<SearchResult[]> {\n  // Try SerpApi first\n  if (process.env.SERPAPI_API_KEY) {\n    try {\n      const response = await axios.get('https://serpapi.com/search', {\n        params: {\n          q: query,\n          api_key: process.env.SERPAPI_API_KEY,\n          num: numResults,\n          engine: 'google',\n        },\n        timeout: 5000,\n      });\n\n      return response.data.organic_results.map((r: any) => ({\n        title: r.title,\n        snippet: r.snippet,\n        link: r.link,\n      }));\n    } catch (error) {\n      logger.error({ error }, 'SerpApi search failed');\n    }\n  }\n\n  // Fallback to Google Custom Search\n  if (process.env.GOOGLE_SEARCH_API_KEY && process.env.GOOGLE_SEARCH_ENGINE_ID) {\n    try {\n      const response = await axios.get('https://www.googleapis.com/customsearch/v1', {\n        params: {\n          key: process.env.GOOGLE_SEARCH_API_KEY,\n          cx: process.env.GOOGLE_SEARCH_ENGINE_ID,\n          q: query,\n          num: numResults,\n        },\n        timeout: 5000,\n      });\n\n      return response.data.items.map((r: any) => ({\n        title: r.title,\n        snippet: r.snippet,\n        link: r.link,\n      }));\n    } catch (error) {\n      logger.error({ error }, 'Google Search failed');\n    }\n  }\n\n  // If no search configured, return empty\n  logger.warn('No web search API configured');\n  return [];\n}\n"
+        }
+      ]
+    },
+    {
+      "step": 7,
+      "title": "Create AI guest assistant endpoint",
+      "details": "Build a new API endpoint `/api/ai/guest-assistant` that accepts a question, retrieves relevant knowledge base chunks, optionally performs web search, and uses DeepSeek to generate an answer. Include source citations.",
+      "files": [
+        {
+          "path": "server/routes.ts",
+          "action": "modify",
+          "content": "// Add imports\nimport { retrieveRelevantChunks, setInMemoryChunks } from './lib/knowledge-base/retriever';\nimport { webSearch } from './lib/web-search';\nimport { processKnowledgeBase } from './lib/knowledge-base/processor';\nimport { callDeepSeek } from './lib/deepseek';\nimport { aiRateLimiter } from './middleware/rate-limit';\n\n// Optional: Trigger knowledge base processing on startup (in background)\nif (process.env.KNOWLEDGE_BASE_PATH) {\n  processKnowledgeBase(process.env.KNOWLEDGE_BASE_PATH)\n    .then(chunks => {\n      if (chunks) setInMemoryChunks(chunks);\n      logger.info('Knowledge base loaded');\n    })\n    .catch(err => logger.error({ err }, 'Failed to load knowledge base'));\n}\n\n// Add endpoint after existing AI routes\napp.post('/api/ai/guest-assistant', requireAuth, aiRateLimiter, async (req, res) => {\n  const { question, useWebSearch = false } = req.body;\n\n  if (!question || typeof question !== 'string') {\n    return res.status(400).json({ error: 'Missing question' });\n  }\n\n  try {\n    // 1. Retrieve from knowledge base\n    const kbChunks = await retrieveRelevantChunks(question);\n    \n    // 2. Optional web search\n    let webResults: any[] = [];\n    if (useWebSearch && (process.env.SERPAPI_API_KEY || (process.env.GOOGLE_SEARCH_API_KEY && process.env.GOOGLE_SEARCH_ENGINE_ID))) {\n      webResults = await webSearch(question);\n    }\n\n    // 3. Build context for DeepSeek\n    let context = '';\n    const sources: Array<{ type: string; source: string; excerpt: string }> = [];\n\n    if (kbChunks.length > 0) {\n      context += 'Information from restaurant knowledge base:\\n\\n';\n      kbChunks.forEach((chunk, i) => {\n        context += `[${i+1}] ${chunk.text}\\n\\n`;\n        sources.push({\n          type: 'knowledge-base',\n          source: chunk.metadata.source,\n          excerpt: chunk.text.substring(0, 150) + '...',\n        });\n      });\n    }\n\n    if (webResults.length > 0) {\n      context += 'Information from web search:\\n\\n';\n      webResults.forEach((result, i) => {\n        context += `[Web ${i+1}] ${result.title}\\n${result.snippet}\\nSource: ${result.link}\\n\\n`;\n        sources.push({\n          type: 'web',\n          source: result.link,\n          excerpt: result.snippet,\n        });\n      });\n    }\n\n    // 4. Prepare prompt\n    const systemPrompt = `You are a helpful restaurant assistant for guests. Answer questions about menu items, ingredients, allergens, parking, events, and other restaurant-related topics. Use the provided context to give accurate answers. If the context doesn't contain the information, politely say you don't know. Always be friendly and concise.`;\n\n    const userPrompt = context \n      ? `Context:\\n${context}\\n\\nGuest question: ${question}`\n      : `Guest question: ${question}`;\n\n    // 5. Call DeepSeek\n    const answer = await callDeepSeek([\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: userPrompt },\n    ], { maxTokens: 300, temperature: 0.3 });\n\n    // 6. Return answer with sources\n    res.json({\n      answer,\n      sources: sources.slice(0, 3), // Limit to top 3 sources\n      usedKnowledgeBase: kbChunks.length > 0,\n      usedWebSearch: webResults.length > 0,\n    });\n\n  } catch (error) {\n    logger.error({ error, question }, 'Guest assistant failed');\n    res.status(503).json({ error: 'AI service temporarily unavailable' });\n  }\n});\n"
+        }
+      ]
+    },
+    {
+      "step": 8,
+      "title": "Create frontend guest assistant component",
+      "details": "Build a React component for the customer page that allows guests to ask questions. Display answers with source citations. Integrate into the existing customer page.",
+      "files": [
+        {
+          "path": "client/src/components/guest-assistant.tsx",
+          "action": "create",
+          "content": "import { useState } from 'react';\nimport { Button } from '@/components/ui/button';\nimport { Textarea } from '@/components/ui/textarea';\nimport { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';\nimport { ScrollArea } from '@/components/ui/scroll-area';\nimport { Loader2, Sparkles, ExternalLink } from 'lucide-react';\nimport { toast } from '@/hooks/use-toast';\n\ninterface Source {\n  type: 'knowledge-base' | 'web';\n  source: string;\n  excerpt: string;\n}\n\ninterface AssistantResponse {\n  answer: string;\n  sources: Source[];\n  usedKnowledgeBase: boolean;\n  usedWebSearch: boolean;\n}\n\nexport function GuestAssistant({ orderId }: { orderId: string }) {\n  const [question, setQuestion] = useState('');\n  const [loading, setLoading] = useState(false);\n  const [response, setResponse] = useState<AssistantResponse | null>(null);\n  const [useWebSearch, setUseWebSearch] = useState(false);\n\n  const handleAsk = async () => {\n    if (!question.trim()) return;\n\n    setLoading(true);\n    try {\n      const res = await fetch('/api/ai/guest-assistant', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({ question, useWebSearch }),\n        credentials: 'include',\n      });\n\n      if (!res.ok) {\n        throw new Error('Failed to get answer');\n      }\n\n      const data = await res.json();\n      setResponse(data);\n    } catch (error) {\n      toast({\n        title: 'Error',\n        description: 'Could not get answer. Please try again.',\n        variant: 'destructive',\n      });\n    } finally {\n      setLoading(false);\n    }\n  };\n\n  return (\n    <Card className=\"w-full mt-4\">\n      <CardHeader>\n        <CardTitle className=\"flex items-center gap-2\">\n          <Sparkles className=\"h-5 w-5 text-primary\" />\n          AI Guest Assistant\n        </CardTitle>\n        <CardDescription>\n          Ask about menu items, ingredients, parking, events, or anything else about the restaurant.\n        </CardDescription>\n      </CardHeader>\n      <CardContent>\n        <div className=\"space-y-4\">\n          <Textarea\n            placeholder=\"e.g., Does the salmon dish contain nuts? What are today's specials? Where can I park?\"\n            value={question}\n            onChange={(e) => setQuestion(e.target.value)}\n            rows={3}\n          />\n          \n          <div className=\"flex items-center gap-4\">\n            <label className=\"flex items-center gap-2 text-sm\">\n              <input\n                type=\"checkbox\"\n                checked={useWebSearch}\n                onChange={(e) => setUseWebSearch(e.target.checked)}\n                className=\"rounded border-gray-300\"\n              />\n              Include web search (for calories, current info)\n            </label>\n            \n            <Button\n              onClick={handleAsk}\n              disabled={loading || !question.trim()}\n              className=\"ml-auto\"\n            >\n              {loading && <Loader2 className=\"mr-2 h-4 w-4 animate-spin\" />}\n              Ask Assistant\n            </Button>\n          </div>\n\n          {response && (\n            <div className=\"mt-6 space-y-4\">\n              <div className=\"p-4 bg-muted rounded-lg\">\n                <p className=\"whitespace-pre-wrap\">{response.answer}</p>\n              </div>\n\n              {response.sources.length > 0 && (\n                <div>\n                  <h4 className=\"text-sm font-medium mb-2\">Sources:</h4>\n                  <ScrollArea className=\"h-32\">\n                    <div className=\"space-y-2\">\n                      {response.sources.map((source, idx) => (\n                        <div key={idx} className=\"text-xs p-2 bg-secondary/20 rounded\">\n                          <div className=\"flex items-center gap-1 font-medium\">\n                            {source.type === 'web' ? '🌐' : '📄'}\n                            {source.type === 'web' ? (\n                              <a href={source.source} target=\"_blank\" rel=\"noopener noreferrer\" className=\"flex items-center gap-1 hover:underline\">\n                                {source.source.substring(0, 40)}...\n                                <ExternalLink className=\"h-3 w-3\" />\n                              </a>\n                            ) : (\n                              <span>{source.source}</span>\n                            )}\n                          </div>\n                          <p className=\"mt-1 text-muted-foreground\">\"{source.excerpt}\"</p>\n                        </div>\n                      ))}\n                    </div>\n                  </ScrollArea>\n                </div>\n              )}\n            </div>\n          )}\n        </div>\n      </CardContent>\n      <CardFooter className=\"text-xs text-muted-foreground\">\n        Answers are generated by AI and may not be 100% accurate. Always confirm with staff for critical information.\n      </CardFooter>\n    </Card>\n  );\n}\n"
+        },
+        {
+          "path": "client/src/pages/customer.tsx",
+          "action": "modify",
+          "content": "// Add import\nimport { GuestAssistant } from '@/components/guest-assistant';\n\n// Inside the customer page component, after the existing UI elements (e.g., after the message thread)\nreturn (\n  <div className=\"container max-w-2xl mx-auto p-4 space-y-4\">\n    {/* Existing status card, message thread, etc. */}\n    \n    {/* Add the guest assistant */}\n    <GuestAssistant orderId={orderId} />\n  </div>\n);\n"
+        }
+      ]
+    },
+    {
+      "step": 9,
+      "title": "Create knowledge base management script",
+      "details": "Add an npm script to manually trigger knowledge base processing (useful after adding new documents).",
+      "files": [
+        {
+          "path": "package.json",
+          "action": "modify",
+          "content": "\"scripts\": {\n  ...\n  \"kb:process\": \"tsx server/lib/knowledge-base/processor.ts\",\n  \"kb:watch\": \"nodemon --watch knowledge-base --ext pdf,docx,txt,md --exec 'npm run kb:process'\"\n}\n"
+        }
+      ]
+    },
+    {
+      "step": 10,
+      "title": "Set up vector database (ChromaDB)",
+      "details": "Provide instructions for running ChromaDB locally or in production. For simplicity, we'll use the in-memory fallback initially, but recommend ChromaDB for production.",
+      "files": [
+        {
+          "path": "docs/vector-database-setup.md",
+          "action": "create",
+          "content": "# Vector Database Setup for Knowledge Base\n\nFor production use, we recommend running ChromaDB in a Docker container:\n\n```bash\ndocker run -p 8000:8000 chromadb/chroma\n```\n\nThis will start ChromaDB on port 8000. The knowledge base processor will automatically connect to it.\n\n## Persistent storage\n\nTo persist data across restarts, mount a volume:\n\n```bash\ndocker run -p 8000:8000 -v ./chroma-data:/chroma/chroma chromadb/chroma\n```\n\n## Environment variables\n\nSet `CHROMA_HOST` and `CHROMA_PORT` if you're running ChromaDB on a different host.\n\n## Fallback mode\n\nIf ChromaDB is not available, the system falls back to in-memory search with basic keyword matching. This is sufficient for small knowledge bases but not recommended for production with many documents.\n"
+        }
+      ]
+    },
+    {
+      "step": 11,
+      "title": "Update documentation",
+      "details": "Update README.md and ARCHITECTURE.md with the new AI Guest Assistant features.",
+      "files": [
+        {
+          "path": "README.md",
+          "action": "modify",
+          "content": "## AI Guest Assistant\n\nGuests can now ask questions directly from the order status page. The AI assistant uses:\n\n- **Knowledge Base**: Upload menus, ingredient lists, parking info, event details to `/knowledge-base`. Supported formats: PDF, DOCX, TXT, MD.\n- **RAG (Retrieval-Augmented Generation)**: Documents are automatically chunked, embedded (using local `all-MiniLM-L6-v2` model), and stored in ChromaDB for fast semantic search.\n- **Web Search (optional)**: Enable with `ENABLE_WEB_SEARCH=true` and configure SerpApi or Google Custom Search. Useful for real-time info like calorie counts or current events.\n- **DeepSeek AI**: Generates friendly, accurate answers based on retrieved context.\n\n### Managing the Knowledge Base\n\n1. Place documents in the `/knowledge-base` folder (organize by subfolders).\n2. Run `npm run kb:process` to manually trigger indexing.\n3. For automatic updates when files change, use `npm run kb:watch`.\n\n### Privacy & Security\n\n- All document processing and embedding happens locally – no data is sent to external services except DeepSeek API (for answer generation) and optionally web search APIs.\n- Source citations help guests verify information.\n- The feature is only available to authenticated customers with a valid order ID.\n"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "action": "modify",
+          "content": "## AI Guest Assistant Module\n\n### Components\n\n| File | Description |\n|------|-------------|\n| `server/lib/knowledge-base/processor.ts` | Extracts text from documents, chunks, embeds, stores in vector DB |\n| `server/lib/knowledge-base/retriever.ts` | Retrieves relevant chunks for a question |\n| `server/lib/web-search.ts` | Performs web searches via SerpApi/Google |\n| `server/routes.ts` (POST `/api/ai/guest-assistant`) | Orchestrates retrieval + generation |\n| `client/src/components/guest-assistant.tsx` | React UI component for customers |\n\n### Data Flow\n\n1. Customer enters question on order page.\n2. Frontend sends POST to `/api/ai/guest-assistant`.\n3. Server:\n   - Embeds question using local model.\n   - Retrieves top 5 relevant chunks from ChromaDB.\n   - If web search enabled, fetches top 3 web results.\n   - Builds context with sources.\n   - Calls DeepSeek API with system prompt and context.\n4. Returns answer + source citations.\n5. Frontend displays answer with collapsible sources.\n\n### Token Optimization\n\n- Chunks limited to 500 characters with 50 overlap.\n- Only top 5 chunks sent to DeepSeek (keeps context small).\n- Web search results summarized (only title + snippet).\n- Temperature 0.3 for factual answers.\n\n### Dependencies\n\n- `@xenova/transformers` – local embedding generation (no API cost)\n- `chromadb` – vector database\n- `pdf-parse`, `mammoth` – document extraction\n- `@langchain/textsplitters` – intelligent chunking\n"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "The AI Guest Assistant is fully integrated into the existing Bistro Buzzer architecture, reusing the authentication and rate limiting infrastructure.",
+    "All document processing and embedding happens locally using Transformer.js – no external API calls for embeddings, saving costs and ensuring privacy.",
+    "The knowledge base folder structure allows easy organization by category, which is preserved in metadata for better source tracking.",
+    "Web search is optional and can be enabled with API keys – useful for dynamic information like calorie counts or current events.",
+    "The system is designed to be token-efficient: only the most relevant chunks are sent to DeepSeek, and responses are concise (max 300 tokens).",
+    "Source citations build trust and allow guests to verify information.",
+    "The assistant is only available to authenticated customers with a valid order ID, preventing abuse.",
+    "For production use, set up ChromaDB with persistent storage to avoid re-indexing on every restart."
+  ]
+}

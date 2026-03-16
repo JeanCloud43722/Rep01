@@ -14,8 +14,11 @@ import { logger } from "./lib/logger";
 import { sanitizeInput } from "./lib/sanitize";
 import { ValidationError, canReactivate } from "./lib/state-machine";
 import { requireAuth } from "./middleware/auth";
-import { getReplySuggestion } from "./lib/deepseek";
+import { getReplySuggestion, getGuestAnswer } from "./lib/deepseek";
 import { aiRateLimiter } from "./middleware/rate-limit";
+import { retrieveRelevantChunks, getChunkCount } from "./lib/knowledge-base/retriever";
+import { processKnowledgeBase } from "./lib/knowledge-base/processor";
+import { webSearch } from "./lib/web-search";
 import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
@@ -1069,6 +1072,80 @@ export async function registerRoutes(
     }
   });
 
+  // ── AI Guest Assistant (public — requires valid orderId) ──
+  app.post("/api/ai/guest-assistant", aiRateLimiter, async (req, res) => {
+    try {
+      const bodySchema = z.object({
+        orderId: z.string().min(1).max(64),
+        question: z.string().min(1).max(500),
+      });
+
+      const { orderId, question } = bodySchema.parse(req.body);
+
+      const order = await storage.getOrder(orderId);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const config = getConfig();
+      if (!config.deepseekApiKey) {
+        return res.status(503).json({ error: "AI guest assistant is not configured on this server." });
+      }
+
+      // Retrieve relevant knowledge base chunks
+      const rawChunks = retrieveRelevantChunks(question, 5);
+      const knowledgeChunks = rawChunks.map((r) => ({
+        text: r.chunk.text,
+        source: r.chunk.metadata.source,
+        category: r.chunk.metadata.category,
+      }));
+
+      // Optional web search (only if keys are configured)
+      let searchResults: Array<{ title: string; snippet: string; link: string }> = [];
+      if (config.serpApiKey || (config.googleSearchApiKey && config.googleSearchEngineId)) {
+        searchResults = await webSearch(question, 3);
+      }
+
+      const { answer, usedWebSearch } = await getGuestAnswer(question, knowledgeChunks, searchResults);
+
+      // Build source citations
+      const sources: Array<{
+        type: "knowledge-base" | "web";
+        title: string;
+        excerpt: string;
+        url?: string;
+        category?: string;
+      }> = [
+        ...rawChunks.map((r) => ({
+          type: "knowledge-base" as const,
+          title: r.chunk.metadata.filename,
+          excerpt: r.chunk.text.slice(0, 120) + (r.chunk.text.length > 120 ? "…" : ""),
+          category: r.chunk.metadata.category,
+        })),
+        ...searchResults.map((r) => ({
+          type: "web" as const,
+          title: r.title,
+          excerpt: r.snippet,
+          url: r.link,
+        })),
+      ];
+
+      logger.info("Guest assistant answered", {
+        source: "guest-ai",
+        orderId,
+        kbChunks: knowledgeChunks.length,
+        webResults: searchResults.length,
+        usedWebSearch,
+      });
+
+      res.json({ answer, sources });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request body" });
+      }
+      logger.error("Guest assistant error", { source: "guest-ai", error: (error as Error).message });
+      res.status(500).json({ error: "Failed to generate answer" });
+    }
+  });
+
   // ── Cleanup endpoint ──
   app.post("/api/orders/cleanup", requireAuth, async (req, res) => {
     try {
@@ -1089,6 +1166,11 @@ export async function registerRoutes(
       res.status(500).json({ error: "Cleanup failed" });
     }
   });
+
+  // ── Knowledge base: process documents on startup (background) ──
+  processKnowledgeBase().catch((err) =>
+    logger.warn("Knowledge base processing error", { source: "kb", err: String(err) })
+  );
 
   // ── Automatic cleanup interval (every hour) ──
   setInterval(async () => {

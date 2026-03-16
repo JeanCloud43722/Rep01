@@ -67,6 +67,20 @@ const resources = {
       'time.min_ago': '{{minutes}}m ago',
       'time.hour_ago': '{{hours}}h ago',
       'time.day_ago': '{{days}}d ago',
+
+      // Guest assistant
+      'ga.title': 'Ask Our AI Assistant',
+      'ga.subtitle': 'Ask about our menu, ingredients, allergens, parking, events, and more.',
+      'ga.placeholder': 'e.g. Does the pizza contain gluten?',
+      'ga.input_label': 'Your question',
+      'ga.send_label': 'Ask',
+      'ga.sources': 'Sources',
+      'ga.source_web': 'Web',
+      'ga.source_kb': 'Info',
+      'ga.history_label': 'Conversation history',
+      'ga.disclaimer': 'AI responses may not be 100% accurate. Please confirm with staff for allergen-critical questions.',
+      'ga.error_title': 'Request failed',
+      'ga.error_desc': 'Could not get an answer. Please try again or ask a staff member.',
     }
   },
   de: {
@@ -134,6 +148,20 @@ const resources = {
       'time.min_ago': 'vor {{minutes}}m',
       'time.hour_ago': 'vor {{hours}}h',
       'time.day_ago': 'vor {{days}}T',
+
+      // Guest assistant
+      'ga.title': 'KI-Assistent fragen',
+      'ga.subtitle': 'Fragen Sie zu unserem Menü, Zutaten, Allergenen, Parken, Veranstaltungen und mehr.',
+      'ga.placeholder': 'z.B. Enthält die Pizza Gluten?',
+      'ga.input_label': 'Ihre Frage',
+      'ga.send_label': 'Fragen',
+      'ga.sources': 'Quellen',
+      'ga.source_web': 'Web',
+      'ga.source_kb': 'Info',
+      'ga.history_label': 'Gesprächsverlauf',
+      'ga.disclaimer': 'KI-Antworten können nicht 100% genau sein. Bitte beim Personal nachfragen bei allergierelevanten Fragen.',
+      'ga.error_title': 'Anfrage fehlgeschlagen',
+      'ga.error_desc': 'Antwort konnte nicht abgerufen werden. Bitte erneut versuchen oder Personal fragen.',
     }
   }
 };

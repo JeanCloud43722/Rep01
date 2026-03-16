@@ -10,6 +10,7 @@ import { createWebSocketManager } from "@/lib/websocket-manager";
 import { formatOrderId } from "@/lib/format-utils";
 import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
+import { GuestAssistant } from "@/components/guest-assistant";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -715,6 +716,9 @@ export default function CustomerPage() {
           onSend={(text) => sendMessageMutation.mutate(text)}
           isSending={sendMessageMutation.isPending}
         />
+
+        {/* AI Guest Assistant */}
+        {orderId && <GuestAssistant orderId={orderId} />}
 
         {/* Status bar with mute toggle (T006) */}
         <div className="flex items-center justify-between px-1 text-xs">

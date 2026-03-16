@@ -6,6 +6,9 @@ export interface AppConfig {
   vapidPublicKey: string | undefined;
   vapidPrivateKey: string | undefined;
   deepseekApiKey: string | undefined;
+  serpApiKey: string | undefined;
+  googleSearchApiKey: string | undefined;
+  googleSearchEngineId: string | undefined;
   port: number;
   nodeEnv: "development" | "production" | undefined;
   sessionSecret: string;
@@ -36,10 +39,18 @@ export function validateEnvironment(): AppConfig {
     logger.warn("Ephemeral VAPID keys will be generated. Push subscriptions will NOT survive restarts.", { source: "config" });
   }
 
-  // DEEPSEEK_API_KEY — optional; AI reply suggestions disabled without it
+  // DEEPSEEK_API_KEY — optional; AI features disabled without it
   const deepseekApiKey = process.env.DEEPSEEK_API_KEY || undefined;
   if (!deepseekApiKey) {
-    logger.info("DEEPSEEK_API_KEY not set — AI reply suggestions will be disabled.", { source: "config" });
+    logger.info("DEEPSEEK_API_KEY not set — AI features will be disabled.", { source: "config" });
+  }
+
+  // Web search keys — optional; web search disabled without them
+  const serpApiKey = process.env.SERPAPI_API_KEY || undefined;
+  const googleSearchApiKey = process.env.GOOGLE_SEARCH_API_KEY || undefined;
+  const googleSearchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID || undefined;
+  if (!serpApiKey && !googleSearchApiKey) {
+    logger.info("No web search API keys set — guest assistant will rely on knowledge base only.", { source: "config" });
   }
 
   // PORT — optional, default 5000, must be 1–65535
@@ -92,6 +103,9 @@ export function validateEnvironment(): AppConfig {
     vapidPublicKey,
     vapidPrivateKey,
     deepseekApiKey,
+    serpApiKey,
+    googleSearchApiKey,
+    googleSearchEngineId,
     port,
     nodeEnv,
     sessionSecret,
