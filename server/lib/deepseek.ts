@@ -1,14 +1,12 @@
 import { createHash } from "crypto";
 import { logger } from "./logger";
 import { getConfig } from "../env-validation";
-import { franc } from "franc-min";
-import iso6391 from "iso-639-1";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_MESSAGES = 5;
 const MAX_MESSAGE_LENGTH = 100;
-const MIN_TEXT_FOR_DETECTION = 10; // Minimum text length for reliable language detection
+const MAX_LAST_CUSTOMER_LENGTH = 500;
 
 interface CacheEntry {
   suggestion: string;
@@ -33,24 +31,6 @@ function truncateMessages(messages: Array<{ text: string; sender: string; sentAt
   }));
 }
 
-function detectLanguage(text: string): string | null {
-  if (text.length < MIN_TEXT_FOR_DETECTION) {
-    return null;
-  }
-
-  try {
-    const langCode = franc(text);
-    if (langCode === "und") {
-      return null;
-    }
-
-    const langName = iso6391.getName(langCode);
-    return langName || null;
-  } catch {
-    return null;
-  }
-}
-
 function buildPrompt(
   messages: Array<{ text: string; sender: string }>,
   lastCustomerMessageFull: string | undefined
@@ -59,17 +39,12 @@ function buildPrompt(
     .map((m) => `${m.sender === "staff" ? "Staff" : "Customer"}: ${m.text}`)
     .join("\n");
 
-  let languageHint = "";
-  if (lastCustomerMessageFull) {
-    const detectedLang = detectLanguage(lastCustomerMessageFull);
-    if (detectedLang) {
-      languageHint = `Respond ONLY in ${detectedLang}.`;
-    } else if (lastCustomerMessageFull.length >= MIN_TEXT_FOR_DETECTION) {
-      languageHint = `Respond in the same language as the customer's last message.`;
-    }
+  let languageInstruction = "";
+  if (lastCustomerMessageFull && lastCustomerMessageFull.length > 0) {
+    languageInstruction = `\n\nIMPORTANT: The customer's last message was: "${lastCustomerMessageFull}"\nRespond in the EXACT SAME LANGUAGE as this message. Do not translate. Match the language precisely.`;
   }
 
-  return `You are a helpful restaurant staff assistant. Based on this conversation, suggest a short, friendly reply from the staff to the customer. Keep it under 100 characters. ${languageHint} Reply with ONLY the suggested message text, nothing else.\n\nConversation:\n${history}\n\nSuggested staff reply:`;
+  return `You are a helpful restaurant staff assistant. Based on this conversation, suggest a short, friendly reply from the staff to the customer. Keep it under 100 characters. Reply with ONLY the suggested message text, nothing else.${languageInstruction}\n\nConversation:\n${history}\n\nSuggested staff reply:`;
 }
 
 export async function getReplySuggestion(
@@ -94,7 +69,8 @@ export async function getReplySuggestion(
 
   const lastCustomerMessageFull = [...messageHistory]
     .reverse()
-    .find((m) => m.sender === "customer")?.text;
+    .find((m) => m.sender === "customer")?.text
+    .slice(0, MAX_LAST_CUSTOMER_LENGTH);
 
   const prompt = buildPrompt(truncated, lastCustomerMessageFull);
 

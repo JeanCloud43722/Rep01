@@ -1,0 +1,54 @@
+```json
+{
+  "project": "Bistro Buzzer – Fix Language Detection in Reply Assistant",
+  "version": "1.3",
+  "description": "Resolve the issue where the AI sometimes responds in the wrong language (e.g., Spanish instead of English) by replacing external language detection with a robust prompt-based method. The system now always includes the full last customer message in the instruction and explicitly forces the AI to respond in the exact same language as that message. This eliminates reliance on potentially inaccurate language detection libraries and leverages the AI's inherent multilingual understanding.",
+  "instructions": [
+    {
+      "step": 1,
+      "title": "Simplify language handling in deepseek.ts",
+      "details": "Modify `server/lib/deepseek.ts` to remove the external language detection (franc/iso-639-1) and instead always include the last customer message (in full) with a strong instruction to respond in the same language. This ensures the AI uses the actual message text to infer the language, which is more reliable.",
+      "files": [
+        {
+          "path": "server/lib/deepseek.ts",
+          "action": "modify",
+          "description": "Replace the language detection logic with a simple extraction of the last customer message, and craft the system prompt to explicitly require responding in the same language as that message.",
+          "content": "import axios from 'axios';\nimport { createHash } from 'crypto';\nimport { logger } from './logger';\n\nconst DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';\nconst CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour\nconst MAX_MESSAGES = 5;               // Use only the last 5 messages for context\nconst MAX_MESSAGE_LENGTH = 100;        // Truncate older messages to save tokens\nconst MAX_LAST_CUSTOMER_LENGTH = 500;  // Keep last customer message full length\n\ninterface CacheEntry {\n  suggestion: string;\n  timestamp: number;\n}\n\nconst suggestionCache = new Map<string, CacheEntry>();\n\nfunction generateCacheKey(messages: any[], orderStatus: string): string {\n  const relevantData = messages\n    .map(m => `${m.sender}:${m.text.substring(0, MAX_MESSAGE_LENGTH)}`)\n    .join('|');\n  const hash = createHash('sha256').update(relevantData + orderStatus).digest('hex');\n  return hash;\n}\n\nfunction getCachedSuggestion(key: string): string | null {\n  const entry = suggestionCache.get(key);\n  if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {\n    return entry.suggestion;\n  }\n  suggestionCache.delete(key);\n  return null;\n}\n\nfunction setCachedSuggestion(key: string, suggestion: string): void {\n  if (suggestionCache.size > 100) {\n    const oldestKey = suggestionCache.keys().next().value;\n    suggestionCache.delete(oldestKey);\n  }\n  suggestionCache.set(key, { suggestion, timestamp: Date.now() });\n}\n\ninterface DeepSeekMessage {\n  role: 'system' | 'user' | 'assistant';\n  content: string;\n}\n\nexport async function callDeepSeek(\n  messages: DeepSeekMessage[],\n  options?: { maxTokens?: number; temperature?: number }\n): Promise<string> {\n  if (!process.env.DEEPSEEK_API_KEY) {\n    throw new Error('DEEPSEEK_API_KEY not configured');\n  }\n\n  try {\n    const response = await axios.post(\n      DEEPSEEK_API_URL,\n      {\n        model: 'deepseek-chat',\n        messages,\n        max_tokens: options?.maxTokens ?? 150,\n        temperature: options?.temperature ?? 0.7,\n      },\n      {\n        headers: {\n          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,\n          'Content-Type': 'application/json',\n        },\n        timeout: 8000,\n      }\n    );\n    return response.data.choices[0].message.content;\n  } catch (error) {\n    logger.error({ error }, 'DeepSeek API call failed');\n    throw error;\n  }\n}\n\nexport async function getReplySuggestion(\n  messageHistory: any[],\n  orderStatus: string\n): Promise<string> {\n  // 1. Reduce messages and truncate older ones\n  const recentMessages = messageHistory.slice(-MAX_MESSAGES).map(m => ({\n    sender: m.sender,\n    text: m.text.length > MAX_MESSAGE_LENGTH ? m.text.substring(0, MAX_MESSAGE_LENGTH) + '…' : m.text,\n  }));\n\n  // 2. Find the last customer message (in full length, not truncated)\n  const lastCustomerMsgObj = messageHistory\n    .filter(m => m.sender === 'customer')\n    .pop();\n  const lastCustomerFullText = lastCustomerMsgObj\n    ? (lastCustomerMsgObj.text.length > MAX_LAST_CUSTOMER_LENGTH \n        ? lastCustomerMsgObj.text.substring(0, MAX_LAST_CUSTOMER_LENGTH) + '…' \n        : lastCustomerMsgObj.text)\n    : null;\n\n  // 3. Generate cache key (using truncated data for consistency)\n  const cacheKey = generateCacheKey(recentMessages, orderStatus);\n  const cached = getCachedSuggestion(cacheKey);\n  if (cached) {\n    logger.debug('Returning cached suggestion');\n    return cached;\n  }\n\n  // 4. Build prompt with language instruction based on full last customer message\n  const formatted = recentMessages\n    .map(m => `${m.sender === 'customer' ? 'Customer' : 'Staff'}: ${m.text}`)\n    .join('\\n');\n\n  let languageInstruction = 'Respond in a friendly, professional tone.';\n  if (lastCustomerFullText) {\n    // Strong instruction: use the exact message to determine language\n    languageInstruction = `IMPORTANT: The customer's last message is: \"${lastCustomerFullText}\". You MUST respond in the EXACT SAME LANGUAGE as that message. Do not switch languages.`;\n  }\n\n  const systemPrompt = `You are a helpful assistant for restaurant staff. \nBased on the conversation history and the current order status (${orderStatus}), generate a short, friendly reply to the customer. \nThe reply should be at most 200 characters and match the tone of the conversation.\n${languageInstruction}`;\n\n  const userPrompt = `Message history:\n${formatted}\n\nReply suggestion:`;\n\n  // 5. Call API\n  try {\n    const suggestion = await callDeepSeek([\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: userPrompt },\n    ], { maxTokens: 100, temperature: 0.5 });\n\n    const trimmed = suggestion.length > 200 ? suggestion.substring(0, 200) + '…' : suggestion;\n\n    setCachedSuggestion(cacheKey, trimmed);\n    return trimmed;\n  } catch (error) {\n    throw error;\n  }\n}\n"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "title": "Remove unused dependencies (optional)",
+      "details": "If you previously installed 'franc-min' and 'iso-639-1' and want to clean up, you can uninstall them. This step is optional as leaving them doesn't harm functionality.",
+      "command": "npm uninstall franc-min iso-639-1"
+    },
+    {
+      "step": 3,
+      "title": "Update documentation",
+      "details": "Reflect the simplified language handling in the documentation.",
+      "files": [
+        {
+          "path": "README.md",
+          "action": "modify",
+          "description": "Remove references to external language detection libraries and describe the new approach.",
+          "content": "### Multilingual AI Reply Assistant\n\nThe Reply Assistant now intelligently responds in the same language as the customer's last message. It achieves this by including the full text of the most recent customer message in the system prompt with a strict instruction to match its language. This method leverages the AI's built-in multilingual capabilities and avoids the need for external language detection libraries, resulting in more accurate and reliable responses.\n\nIf there is no prior customer message, the AI defaults to a friendly, professional tone.\n"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "action": "modify",
+          "description": "Update the language detection section to reflect the new prompt-based method.",
+          "content": "#### Language Handling\n\nThe `getReplySuggestion` function extracts the last customer message (up to 500 characters) and includes it verbatim in the system prompt with an explicit directive to respond in the exact same language. This approach ensures that the AI uses the actual message text to infer the language, which is more robust than automated language detection, especially for short or mixed-language messages.\n\nNo external language detection libraries are used, keeping the system lightweight and reducing potential points of failure.\n"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "This fix resolves the issue where the AI occasionally responded in the wrong language (e.g., Spanish instead of English) by eliminating the external language detector and relying on the AI's own language understanding.",
+    "The last customer message is included in full (up to 500 characters) to provide sufficient context for language inference.",
+    "The cache key remains based on truncated messages to maintain token efficiency, but the full message is used in the prompt only for language instruction.",
+    "If no customer message exists, the instruction falls back to a neutral tone, ensuring the assistant remains helpful in all situations.",
+    "This change requires no additional dependencies and simplifies the codebase."
+  ]
+}
+```
