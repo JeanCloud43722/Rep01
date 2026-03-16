@@ -1045,9 +1045,10 @@ export async function registerRoutes(
           sender: z.enum(["staff", "customer"]),
           sentAt: z.string(),
         })).min(1),
+        language: z.enum(["en", "de"]).optional(),
       });
 
-      const { orderId, messageHistory } = bodySchema.parse(req.body);
+      const { orderId, messageHistory, language } = bodySchema.parse(req.body);
 
       const order = await storage.getOrder(orderId);
       if (!order) return res.status(404).json({ error: "Order not found" });
@@ -1057,8 +1058,8 @@ export async function registerRoutes(
         return res.status(503).json({ error: "AI reply suggestions are not configured on this server." });
       }
 
-      const suggestion = await getReplySuggestion(orderId, messageHistory);
-      logger.info("AI suggestion served", { source: "ai", orderId });
+      const suggestion = await getReplySuggestion(orderId, messageHistory, language);
+      logger.info("AI suggestion served", { source: "ai", orderId, language });
       res.json({ suggestion });
     } catch (error) {
       if (error instanceof z.ZodError) {

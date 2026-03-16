@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -698,6 +699,7 @@ function MessageModal({
   const [message, setMessage] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const { toast } = useToast();
+  const { i18n } = useTranslation();
 
   const handleSubmit = () => {
     if (orderId && message.trim()) {
@@ -721,6 +723,7 @@ function MessageModal({
       const res = await apiRequest("POST", "/api/ai/suggest-reply", {
         orderId,
         messageHistory,
+        language: (i18n.language === "de" ? "de" : "en") as "en" | "de",
       });
       const data = (await res.json()) as { suggestion?: string; error?: string };
       if (data.suggestion) {
