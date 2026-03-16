@@ -5,6 +5,7 @@ export interface AppConfig {
   databaseUrl: string;
   vapidPublicKey: string | undefined;
   vapidPrivateKey: string | undefined;
+  deepseekApiKey: string | undefined;
   port: number;
   nodeEnv: "development" | "production" | undefined;
   sessionSecret: string;
@@ -33,6 +34,12 @@ export function validateEnvironment(): AppConfig {
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || undefined;
   if (!vapidPublicKey || !vapidPrivateKey) {
     logger.warn("Ephemeral VAPID keys will be generated. Push subscriptions will NOT survive restarts.", { source: "config" });
+  }
+
+  // DEEPSEEK_API_KEY — optional; AI reply suggestions disabled without it
+  const deepseekApiKey = process.env.DEEPSEEK_API_KEY || undefined;
+  if (!deepseekApiKey) {
+    logger.info("DEEPSEEK_API_KEY not set — AI reply suggestions will be disabled.", { source: "config" });
   }
 
   // PORT — optional, default 5000, must be 1–65535
@@ -84,6 +91,7 @@ export function validateEnvironment(): AppConfig {
     databaseUrl: databaseUrl!,
     vapidPublicKey,
     vapidPrivateKey,
+    deepseekApiKey,
     port,
     nodeEnv,
     sessionSecret,

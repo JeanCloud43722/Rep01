@@ -14,6 +14,8 @@ import { logger } from "./lib/logger";
 import { sanitizeInput } from "./lib/sanitize";
 import { ValidationError, canReactivate } from "./lib/state-machine";
 import { requireAuth } from "./middleware/auth";
+import { getReplySuggestion } from "./lib/deepseek";
+import { aiRateLimiter } from "./middleware/rate-limit";
 import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
@@ -1029,6 +1031,41 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid notes data" });
       }
       res.status(500).json({ error: "Failed to update notes" });
+    }
+  });
+
+  // ── AI Reply Suggestion ──
+  app.post("/api/ai/suggest-reply", requireAuth, aiRateLimiter, async (req, res) => {
+    try {
+      const bodySchema = z.object({
+        orderId: z.string().min(1),
+        messageHistory: z.array(z.object({
+          id: z.string(),
+          text: z.string(),
+          sender: z.enum(["staff", "customer"]),
+          sentAt: z.string(),
+        })).min(1),
+      });
+
+      const { orderId, messageHistory } = bodySchema.parse(req.body);
+
+      const order = await storage.getOrder(orderId);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const config = getConfig();
+      if (!config.deepseekApiKey) {
+        return res.status(503).json({ error: "AI reply suggestions are not configured on this server." });
+      }
+
+      const suggestion = await getReplySuggestion(orderId, messageHistory);
+      logger.info("AI suggestion served", { source: "ai", orderId });
+      res.json({ suggestion });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request body" });
+      }
+      logger.error("AI suggestion error", { source: "ai", error: (error as Error).message });
+      res.status(500).json({ error: "Failed to generate reply suggestion" });
     }
   });
 

@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX, LogOut, RotateCcw } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -686,15 +686,19 @@ function MessageModal({
   orderId,
   open,
   onClose,
-  onSendMessage
+  onSendMessage,
+  messageHistory
 }: {
   orderId: string | null;
   open: boolean;
   onClose: () => void;
   onSendMessage: (orderId: string, message: string) => void;
+  messageHistory?: Array<{ id: string; text: string; sender: "staff" | "customer"; sentAt: string }>;
 }) {
   const [message, setMessage] = useState("");
-  
+  const [aiLoading, setAiLoading] = useState(false);
+  const { toast } = useToast();
+
   const handleSubmit = () => {
     if (orderId && message.trim()) {
       onSendMessage(orderId, message);
@@ -702,13 +706,38 @@ function MessageModal({
       setMessage("");
     }
   };
-  
+
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) {
       setMessage("");
     }
     onClose();
   };
+
+  const handleAiSuggest = async () => {
+    if (!orderId || !messageHistory || messageHistory.length === 0) return;
+    setAiLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/ai/suggest-reply", {
+        orderId,
+        messageHistory,
+      });
+      const data = res as { suggestion?: string; error?: string };
+      if (data.suggestion) {
+        setMessage(data.suggestion.slice(0, 200));
+        toast({ title: "AI suggestion ready", description: "Review and edit before sending." });
+      }
+    } catch (err: any) {
+      const msg = err?.message?.includes("503")
+        ? "AI reply suggestions are not enabled on this server."
+        : "Could not get AI suggestion. Please try again.";
+      toast({ title: "AI unavailable", description: msg, variant: "destructive" });
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const hasHistory = messageHistory && messageHistory.length > 0;
   
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -721,7 +750,26 @@ function MessageModal({
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="custom-message">Message</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="custom-message">Message</Label>
+              {hasHistory && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAiSuggest}
+                  disabled={aiLoading}
+                  data-testid="button-ai-suggest"
+                  className="h-7 text-xs gap-1"
+                >
+                  {aiLoading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" />
+                  )}
+                  {aiLoading ? "Thinking…" : "AI Suggest"}
+                </Button>
+              )}
+            </div>
             <Input
               id="custom-message"
               placeholder="e.g., Your order is almost ready..."
@@ -1421,6 +1469,10 @@ export default function AdminPage() {
         open={!!messageOrderId}
         onClose={() => setMessageOrderId(null)}
         onSendMessage={handleSendMessage}
+        messageHistory={
+          [...(activeQuery.data?.orders ?? []), ...(completedQuery.data?.orders ?? [])]
+            .find((o) => o.id === messageOrderId)?.messages
+        }
       />
       
       <ScheduleModal

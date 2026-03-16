@@ -1,0 +1,115 @@
+{
+  "project": "Bistro Buzzer – Reply Assistant Integration (DeepSeek AI)",
+  "version": "1.0",
+  "description": "Implementation of an AI-powered Reply Assistant for the admin dashboard. Uses the DeepSeek API to automatically generate reply suggestions based on message history. Includes caching, token optimization, rate limiting, and robust error handling.",
+  "instructions": [
+    {
+      "step": 1,
+      "title": "Add environment variables",
+      "details": "Add the `DEEPSEEK_API_KEY` variable as optional in the file `server/env-validation.ts`. Also update the README.md with a note about the new API key.",
+      "files": [
+        {
+          "path": "server/env-validation.ts",
+          "action": "modify",
+          "description": "Extend the arrays `requiredEnvVars` and `optionalEnvVars` and the validation logic.",
+          "content": "// ===== Changes in server/env-validation.ts =====\n\n// Existing imports remain unchanged\n\n// Extend the arrays:\nexport const requiredEnvVars = [\n  'DATABASE_URL',\n  // possibly other existing required vars\n] as const;\n\nexport const optionalEnvVars = [\n  'DEEPSEEK_API_KEY',   // NEW\n  'VAPID_PUBLIC_KEY',\n  'VAPID_PRIVATE_KEY',\n  // ... other optional vars\n] as const;\n\n// In the validateEnvironment() function, optionally add a warning:\n// (e.g., if DEEPSEEK_API_KEY is not set, but the AI feature should still be usable)\nif (!process.env.DEEPSEEK_API_KEY) {\n  logger.warn('DEEPSEEK_API_KEY not set – AI suggestion feature will be unavailable');\n}\n"
+        },
+        {
+          "path": "README.md",
+          "action": "modify",
+          "description": "Add an entry for DEEPSEEK_API_KEY in the environment variables table.",
+          "content": "| Variable | Required | Default | Description |\n|----------|----------|---------|-------------|\n| `DEEPSEEK_API_KEY` | Optional | – | API key for DeepSeek (required for AI reply suggestions). Without this key, the feature is disabled. |\n"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "title": "DeepSeek service with caching and token optimization",
+      "details": "Create the file `server/lib/deepseek.ts`. This contains the logic for API calls, caching, message truncation, and prompt generation.",
+      "files": [
+        {
+          "path": "server/lib/deepseek.ts",
+          "action": "create",
+          "content": "import axios from 'axios';\nimport { createHash } from 'crypto';\nimport { logger } from './logger';\n\nconst DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';\nconst CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour\nconst MAX_MESSAGES = 5;               // Use only the last 5 messages\nconst MAX_MESSAGE_LENGTH = 100;        // Truncate messages to save tokens\n\ninterface CacheEntry {\n  suggestion: string;\n  timestamp: number;\n}\n\nconst suggestionCache = new Map<string, CacheEntry>();\n\nfunction generateCacheKey(messages: any[], orderStatus: string): string {\n  const relevantData = messages\n    .map(m => `${m.sender}:${m.text.substring(0, MAX_MESSAGE_LENGTH)}`)\n    .join('|');\n  const hash = createHash('sha256').update(relevantData + orderStatus).digest('hex');\n  return hash;\n}\n\nfunction getCachedSuggestion(key: string): string | null {\n  const entry = suggestionCache.get(key);\n  if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {\n    return entry.suggestion;\n  }\n  suggestionCache.delete(key);\n  return null;\n}\n\nfunction setCachedSuggestion(key: string, suggestion: string): void {\n  // Limit cache size (remove oldest entries)\n  if (suggestionCache.size > 100) {\n    const oldestKey = suggestionCache.keys().next().value;\n    suggestionCache.delete(oldestKey);\n  }\n  suggestionCache.set(key, { suggestion, timestamp: Date.now() });\n}\n\ninterface DeepSeekMessage {\n  role: 'system' | 'user' | 'assistant';\n  content: string;\n}\n\nexport async function callDeepSeek(\n  messages: DeepSeekMessage[],\n  options?: { maxTokens?: number; temperature?: number }\n): Promise<string> {\n  if (!process.env.DEEPSEEK_API_KEY) {\n    throw new Error('DEEPSEEK_API_KEY not configured');\n  }\n\n  try {\n    const response = await axios.post(\n      DEEPSEEK_API_URL,\n      {\n        model: 'deepseek-chat',\n        messages,\n        max_tokens: options?.maxTokens ?? 150,\n        temperature: options?.temperature ?? 0.7,\n      },\n      {\n        headers: {\n          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,\n          'Content-Type': 'application/json',\n        },\n        timeout: 8000,\n      }\n    );\n    return response.data.choices[0].message.content;\n  } catch (error) {\n    logger.error({ error }, 'DeepSeek API call failed');\n    throw error;\n  }\n}\n\nexport async function getReplySuggestion(\n  messageHistory: any[],\n  orderStatus: string\n): Promise<string> {\n  // 1. Reduce and truncate messages\n  const recentMessages = messageHistory.slice(-MAX_MESSAGES).map(m => ({\n    sender: m.sender,\n    text: m.text.length > MAX_MESSAGE_LENGTH ? m.text.substring(0, MAX_MESSAGE_LENGTH) + '…' : m.text,\n  }));\n\n  // 2. Generate cache key\n  const cacheKey = generateCacheKey(recentMessages, orderStatus);\n  const cached = getCachedSuggestion(cacheKey);\n  if (cached) {\n    logger.debug('Returning cached suggestion');\n    return cached;\n  }\n\n  // 3. Build prompt\n  const formatted = recentMessages\n    .map(m => `${m.sender === 'customer' ? 'Customer' : 'Staff'}: ${m.text}`)\n    .join('\\n');\n\n  const systemPrompt = `You are a helpful assistant for restaurant staff. \nBased on the conversation history and the current order status (${orderStatus}), generate a short, friendly reply to the customer. \nThe reply should be at most 200 characters and match the tone of the conversation.`;\n\n  const userPrompt = `Message history:\\n${formatted}\\n\\nReply suggestion:`;\n\n  // 4. Call API\n  try {\n    const suggestion = await callDeepSeek([\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: userPrompt },\n    ], { maxTokens: 100, temperature: 0.5 });\n\n    const trimmed = suggestion.length > 200 ? suggestion.substring(0, 200) + '…' : suggestion;\n\n    // 5. Store in cache\n    setCachedSuggestion(cacheKey, trimmed);\n    return trimmed;\n  } catch (error) {\n    throw error;\n  }\n}\n"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "title": "Rate limiting middleware",
+      "details": "Install the dependency `express-rate-limit` and create the file `server/middleware/rate-limit.ts`.",
+      "dependencies": ["express-rate-limit@^6.0.0"],
+      "files": [
+        {
+          "path": "server/middleware/rate-limit.ts",
+          "action": "create",
+          "content": "import rateLimit from 'express-rate-limit';\n\nexport const aiRateLimiter = rateLimit({\n  windowMs: 60 * 1000, // 1 minute\n  max: 10,\n  message: { error: 'Too many AI requests, please try again later.' },\n  standardHeaders: true,\n  legacyHeaders: false,\n});\n"
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "title": "Add API endpoint in routes.ts",
+      "details": "Extend the file `server/routes.ts` with the new endpoint `/api/ai/suggest-reply`. Ensure you add the required imports and use the middleware `requireAuth` and `aiRateLimiter`.",
+      "files": [
+        {
+          "path": "server/routes.ts",
+          "action": "modify",
+          "description": "Add the imports and the endpoint. Preferably after the existing auth routes but before the global error handler.",
+          "content": "// ==== AT THE TOP, add imports: ====\nimport { getReplySuggestion } from './lib/deepseek';\nimport { aiRateLimiter } from './middleware/rate-limit';\n\n// ==== SOMEWHERE INSIDE the registerRoutes FUNCTION (after existing routes) ====\n\n// AI Reply Suggestion (admin only, with rate limiting)\napp.post('/api/ai/suggest-reply', requireAuth, aiRateLimiter, async (req, res) => {\n  const { orderId, messageHistory } = req.body;\n\n  if (!orderId || !Array.isArray(messageHistory)) {\n    return res.status(400).json({ error: 'Missing orderId or messageHistory' });\n  }\n\n  try {\n    const order = await storage.getOrder(orderId);\n    if (!order) {\n      return res.status(404).json({ error: 'Order not found' });\n    }\n\n    const suggestion = await getReplySuggestion(messageHistory, order.status);\n    res.json({ suggestion });\n  } catch (error) {\n    logger.error({ error, orderId }, 'AI suggestion failed');\n    res.status(503).json({ error: 'AI service temporarily unavailable' });\n  }\n});\n"
+        }
+      ]
+    },
+    {
+      "step": 5,
+      "title": "Frontend integration in the admin dashboard",
+      "details": "Modify the file `client/src/pages/admin.tsx` to add a button for the AI suggestion inside the message modal. Since the exact structure of the modal is not detailed in the documentation, a general extension is described that must be applied to the existing component.",
+      "files": [
+        {
+          "path": "client/src/pages/admin.tsx",
+          "action": "modify",
+          "description": "Add state, handler, and UI element for the AI suggestion. Assume there is a MessageModal that uses a textarea and a state `messageInput`.",
+          "content": "// ==== Add imports ====\nimport { Loader2 } from 'lucide-react'; // possibly already present\nimport { toast } from '@/hooks/use-toast'; // or the existing toaster\n\n// ==== Inside the AdminPage component (or the respective subcomponent) ====\n\nconst [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);\n// Assumption: There is a state for the message textarea, e.g., messageInput and setMessageInput\n// If not, it must be created accordingly.\n\nconst handleAiSuggestion = async (orderId: string, messages: Message[]) => {\n  setAiSuggestionLoading(true);\n  try {\n    const response = await fetch('/api/ai/suggest-reply', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ orderId, messageHistory: messages }),\n      credentials: 'include',\n    });\n    if (!response.ok) {\n      throw new Error('AI service error');\n    }\n    const data = await response.json();\n    setMessageInput(data.suggestion); // Set the suggestion into the textarea\n  } catch (error) {\n    toast({\n      title: 'Error',\n      description: 'Could not load AI suggestion.',\n      variant: 'destructive',\n    });\n  } finally {\n    setAiSuggestionLoading(false);\n  }\n};\n\n// ==== In the JSX of the MessageModal (next to the text input field) ====\n{/* Existing textarea */}\n<textarea\n  value={messageInput}\n  onChange={(e) => setMessageInput(e.target.value)}\n  placeholder=\"Enter message...\"\n/>\n<div className=\"flex gap-2 mt-2\">\n  <Button variant=\"outline\" size=\"sm\" onClick={() => handleAiSuggestion(order.id, order.messages)} disabled={aiSuggestionLoading}>\n    {aiSuggestionLoading ? <Loader2 className=\"h-4 w-4 animate-spin\" /> : '🤖 AI Suggestion'}\n  </Button>\n  {/* Existing send button */}\n</div>\n"
+        }
+      ]
+    },
+    {
+      "step": 6,
+      "title": "Install dependencies",
+      "details": "Run the following command in the project root to install the required rate limiting library:",
+      "command": "npm install express-rate-limit"
+    },
+    {
+      "step": 7,
+      "title": "Tests (optional)",
+      "details": "Create a test file for the new endpoint to verify functionality. This is optional but recommended.",
+      "files": [
+        {
+          "path": "server/__tests__/ai.test.ts",
+          "action": "create",
+          "content": "import request from 'supertest';\nimport { app } from '../index';\nimport { describe, it, expect, vi, beforeEach } from 'vitest';\nimport * as deepseek from '../lib/deepseek';\n\nvi.mock('../lib/deepseek');\n\ndescribe('AI Reply Endpoint', () => {\n  beforeEach(() => {\n    vi.resetAllMocks();\n  });\n\n  it('should return 401 without auth', async () => {\n    const res = await request(app)\n      .post('/api/ai/suggest-reply')\n      .send({ orderId: '123', messageHistory: [] });\n    expect(res.status).toBe(401);\n  });\n\n  // Additional tests here...\n});\n"
+        }
+      ]
+    },
+    {
+      "step": 8,
+      "title": "Update documentation",
+      "details": "Update ARCHITECTURE.md with the new modules and API endpoint.",
+      "files": [
+        {
+          "path": "ARCHITECTURE.md",
+          "action": "modify",
+          "content": "Add under 'REST API Reference' the new endpoint:\n\n| Method | Path | Auth | Request Body | Success Response | Status Codes |\n|--------|------|------|-------------|------------------|-------------|\n| POST | `/api/ai/suggest-reply` | Admin | `{ orderId: string, messageHistory: Message[] }` | `{ suggestion: string }` | 200, 400, 401, 404, 503 |\n\nAdd under 'Server Modules' an entry for `server/lib/deepseek.ts` and `server/middleware/rate-limit.ts`.\n"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "The Reply Assistant is fully integrated into the existing architecture and uses the already existing data models (Message).",
+    "Caching reduces the number of API calls and saves tokens.",
+    "The message history is limited to the last 5 messages, and each message is truncated to 100 characters – this further saves tokens.",
+    "If DEEPSEEK_API_KEY is missing, the endpoint returns 503 and the UI shows a corresponding toast.",
+    "Rate limiting protects against abuse (10 requests per minute per IP).",
+    "Authentication ensures that only logged-in admins can use the service."
+  ]
+}
