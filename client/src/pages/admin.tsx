@@ -722,7 +722,7 @@ function MessageModal({
         orderId,
         messageHistory,
       });
-      const data = res as { suggestion?: string; error?: string };
+      const data = (await res.json()) as { suggestion?: string; error?: string };
       if (data.suggestion) {
         setMessage(data.suggestion.slice(0, 200));
         toast({ title: "AI suggestion ready", description: "Review and edit before sending." });
