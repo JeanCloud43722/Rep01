@@ -7,7 +7,7 @@ import webPush from "web-push";
 import schedule from "node-schedule";
 import { pushSubscriptionSchema, adminUsers } from "@shared/schema";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, ilike, and, or, inArray } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
@@ -19,6 +19,7 @@ import { aiRateLimiter } from "./middleware/rate-limit";
 import { retrieveRelevantChunks, getChunkCount } from "./lib/knowledge-base/retriever";
 import { processKnowledgeBase } from "./lib/knowledge-base/processor";
 import { webSearch } from "./lib/web-search";
+import { products, PRODUCT_CATEGORIES } from "../shared/schema";
 import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
@@ -1069,6 +1070,49 @@ export async function registerRoutes(
       }
       logger.error("AI suggestion error", { source: "ai", error: (error as Error).message });
       res.status(500).json({ error: "Failed to generate reply suggestion" });
+    }
+  });
+
+  // ── Products catalog ──
+  app.get("/api/products", async (req, res) => {
+    try {
+      const { category, search, tags, limit: limitRaw } = req.query as Record<string, string | undefined>;
+      const limit = Math.min(parseInt(limitRaw ?? "100", 10) || 100, 200);
+
+      const db = getDb();
+      const conditions: ReturnType<typeof eq>[] = [];
+
+      if (category && PRODUCT_CATEGORIES.includes(category as never)) {
+        conditions.push(eq(products.category, category));
+      }
+
+      if (search) {
+        const pat = `%${search}%`;
+        conditions.push(
+          or(ilike(products.name, pat), ilike(products.description, pat)) as ReturnType<typeof eq>
+        );
+      }
+
+      const rows = await db
+        .select()
+        .from(products)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .limit(limit);
+
+      // Tag filtering (AND logic, done in JS to avoid GIN index complexity)
+      const tagList = tags ? tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+      const filtered = tagList.length
+        ? rows.filter((r) => tagList.every((tag) => (r.tags ?? []).includes(tag)))
+        : rows;
+
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=60");
+      res.json({
+        products: filtered,
+        meta: { total: filtered.length, filters: { category, search, tags }, limit },
+      });
+    } catch (error) {
+      logger.error("Products fetch error", { source: "products", error: (error as Error).message });
+      res.status(500).json({ error: "Failed to fetch products" });
     }
   });
 

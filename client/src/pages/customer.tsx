@@ -372,75 +372,109 @@ export default function CustomerPage() {
     }
   }, [orderId]);
 
-  // ── auto-enable on first interaction ──
+  // ── Manual "Enable Notifications" button handler ──
   const autoEnable = useCallback(async () => {
-    try {
-      const ok = await audioManager.unlock();
-      if (ok) {
-        setAudioUnlocked(true);
-        if (!isMutedRef.current) playBuzzer();
-      }
-    } catch (e) {
-      console.warn("[AutoEnable] Audio:", e);
+    // Audio
+    const ctx = audioManager.getContext();
+    if (ctx && ctx.state === "suspended") {
+      try { await ctx.resume(); } catch {}
     }
+    if (!audioManager.isUnlocked) {
+      try {
+        const ok = await audioManager.unlock();
+        if (ok) {
+          setAudioUnlocked(true);
+          if (!isMutedRef.current) playBuzzer();
+        }
+      } catch (e) {
+        console.warn("[AutoEnable] Audio:", e);
+      }
+    }
+    // Push
     if ("Notification" in window && "serviceWorker" in navigator && orderId) {
       try {
         let perm = Notification.permission;
-        if (perm !== "granted") perm = await Notification.requestPermission();
-        if (perm === "granted") subscribeToPushSilent();
+        if (perm === "default") perm = await Notification.requestPermission();
+        if (perm === "granted" && !pushEnabled) subscribeToPushSilent();
       } catch (e) {
         console.warn("[AutoEnable] Push:", e);
       }
     }
-  }, [orderId, playBuzzer, subscribeToPushSilent]);
+  }, [orderId, pushEnabled, playBuzzer, subscribeToPushSilent]);
 
+  // ── Startup: silently subscribe to push if permission already granted ──
   useEffect(() => {
-    const handle = () => {
-      autoEnable();
-      events.forEach((e) => document.removeEventListener(e, handle));
-    };
-    const events = ["touchstart", "click", "pointerdown", "mousedown", "keydown"];
-    events.forEach((e) => document.addEventListener(e, handle, { once: true, passive: true }));
-    return () => events.forEach((e) => document.removeEventListener(e, handle));
-  }, [autoEnable]);
+    if (!orderId) return;
+    if (
+      "Notification" in window &&
+      "serviceWorker" in navigator &&
+      Notification.permission === "granted" &&
+      !pushEnabled
+    ) {
+      console.log("[Startup] Permission already granted — subscribing silently");
+      subscribeToPushSilent();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId]);
 
+  // ── Consolidated interaction handler: audio resume + push on every gesture ──
   useEffect(() => {
-    const resumeOnInteraction = async () => {
+    let audioUnlockedOnce = audioManager.isUnlocked;
+    let pushRequestedOnce = pushEnabled;
+
+    const handleInteraction = async () => {
+      // 1. Always resume a suspended AudioContext (iOS suspends it on background/lock)
       const ctx = audioManager.getContext();
       if (ctx && ctx.state === "suspended") {
         try {
           await ctx.resume();
-          console.log("[ResumeAudio] AudioContext resumed on interaction");
+          console.log("[Interaction] AudioContext resumed");
         } catch (e) {
-          console.warn("[ResumeAudio] resume failed:", e);
+          console.warn("[Interaction] AudioContext resume failed:", e);
         }
       }
-      if (!audioManager.isUnlocked) {
+
+      // 2. Unlock audio once per session (plays a silent prime + one confirmation chime)
+      if (!audioUnlockedOnce) {
         try {
           const ok = await audioManager.unlock();
-          if (ok) setAudioUnlocked(true);
-        } catch {}
-      }
-      if ("Notification" in window && "serviceWorker" in navigator && orderId && !pushEnabled) {
-        try {
-          if (Notification.permission === "default") {
-            const perm = await Notification.requestPermission();
-            if (perm === "granted") subscribeToPushSilent();
-          } else if (Notification.permission === "granted") {
-            subscribeToPushSilent();
+          if (ok) {
+            audioUnlockedOnce = true;
+            setAudioUnlocked(true);
+            console.log("[Interaction] Audio unlocked");
+            if (!isMutedRef.current) playBuzzer();
           }
-        } catch {}
+        } catch (e) {
+          console.warn("[Interaction] Audio unlock failed:", e);
+        }
+      }
+
+      // 3. Request push-notification permission once per page load (if not yet granted)
+      if (!pushRequestedOnce && "Notification" in window && "serviceWorker" in navigator && orderId) {
+        pushRequestedOnce = true;
+        try {
+          let perm = Notification.permission;
+          console.log("[Interaction] Notification permission:", perm);
+          if (perm === "default") {
+            perm = await Notification.requestPermission();
+            console.log("[Interaction] Permission result:", perm);
+          }
+          if (perm === "granted") {
+            console.log("[Interaction] Subscribing to push");
+            subscribeToPushSilent();
+          } else {
+            console.log("[Interaction] Push permission denied or dismissed");
+          }
+        } catch (e) {
+          console.warn("[Interaction] Push setup failed:", e);
+        }
       }
     };
-    const interactionEvents = ["touchstart", "click", "pointerdown", "mousedown", "keydown"];
-    interactionEvents.forEach((e) =>
-      document.addEventListener(e, resumeOnInteraction, { passive: true })
-    );
-    return () =>
-      interactionEvents.forEach((e) =>
-        document.removeEventListener(e, resumeOnInteraction)
-      );
-  }, [orderId, pushEnabled, subscribeToPushSilent]);
+
+    const EVENTS = ["touchstart", "click", "pointerdown", "mousedown", "keydown", "scroll"];
+    EVENTS.forEach((ev) => document.addEventListener(ev, handleInteraction, { passive: true }));
+    return () => EVENTS.forEach((ev) => document.removeEventListener(ev, handleInteraction));
+  }, [orderId, pushEnabled, playBuzzer, subscribeToPushSilent]);
 
   useEffect(() => audioManager.onUnlockChange(setAudioUnlocked), []);
 

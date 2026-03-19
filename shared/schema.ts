@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   serial,
+  numeric,
   index,
   uniqueIndex,
   check,
@@ -149,3 +150,72 @@ export const adminUsers = pgTable("admin_users", {
   passwordHash: text("password_hash").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ─── Products table ────────────────────────────────────────────────────────────
+
+export const PRODUCT_CATEGORIES = [
+  "Starters",
+  "Soups",
+  "Steaks",
+  "Burgers",
+  "Pasta",
+  "Fish",
+  "Lamb",
+  "Vegetarian",
+  "Ice Cream",
+  "Drinks",
+  "Desserts",
+  "Sides",
+  "Other",
+] as const;
+
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
+export const PRODUCT_TAGS = [
+  "vegetarian",
+  "vegan",
+  "gluten-free",
+  "spicy",
+  "popular",
+  "seasonal",
+] as const;
+
+export type ProductTag = (typeof PRODUCT_TAGS)[number];
+
+export const productSchema = z.object({
+  name: z.string().min(1).max(150),
+  description: z.string().max(500).nullable().optional(),
+  price: z.number().positive().max(9999.99),
+  category: z.enum(PRODUCT_CATEGORIES),
+  allergens: z.array(z.string()).default([]),
+  tags: z.array(z.enum(PRODUCT_TAGS)).default([]),
+  image_url: z.string().url().nullable().optional(),
+  source: z.string().optional(),
+});
+
+export type ProductInput = z.infer<typeof productSchema>;
+
+export const products = pgTable(
+  "products",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    price: numeric("price", { precision: 10, scale: 2 }).notNull(),
+    category: text("category").notNull(),
+    allergens: text("allergens").array().notNull().default(sql`'{}'::text[]`),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    imageUrl: text("image_url"),
+    source: text("source"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("products_name_idx").on(t.name),
+    index("products_category_idx").on(t.category),
+    uniqueIndex("products_name_category_idx").on(t.name, t.category),
+  ]
+);
+
+export type Product = typeof products.$inferSelect;
+export type InsertProduct = typeof products.$inferInsert;
