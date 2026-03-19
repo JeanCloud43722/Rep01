@@ -19,6 +19,7 @@ The system features a responsive UI built with Shadcn/ui and Tailwind CSS. It in
 ### Technical Implementations
 - **Frontend**: Developed with React + TypeScript, Vite, Wouter for routing, and TanStack Query for state management.
 - **Backend**: Implemented using Express.js.
+- **Storage**: PostgreSQL via Drizzle ORM (DbStorage) is the primary production storage engine. Orders and all state persist to the database immediately upon creation, eliminating the need for synchronization hacks.
 - **Shared**: Zod schemas for type-safe data models across frontend and backend.
 - **Push Notifications**: Utilizes a Service Worker (`client/public/sw.js`) and the `web-push` library with VAPID key generation.
 - **Scheduling**: `node-schedule` is used for managing timed notifications.

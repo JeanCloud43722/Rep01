@@ -17,7 +17,6 @@ import {
   insertTestProduct,
   cleanupTestProducts,
   cleanupOrderData,
-  syncOrderToDb,
   VITEST_PRODUCT_PREFIX,
 } from "./setup";
 
@@ -203,8 +202,6 @@ describe("POST /api/orders/:id/confirm-order — happy path", () => {
     const order = await adminAgent.post("/api/orders");
     const orderId = order.body.id as string;
     const iKey = makeUUID();
-    // Sync the in-memory order to PostgreSQL so the order_items FK constraint passes
-    await syncOrderToDb(orderId);
 
     const res = await request(app)
       .post(`/api/orders/${orderId}/confirm-order`)
@@ -230,7 +227,6 @@ describe("POST /api/orders/:id/confirm-order — happy path", () => {
     const order = await adminAgent.post("/api/orders");
     const orderId = order.body.id as string;
     const iKey = makeUUID();
-    await syncOrderToDb(orderId);
 
     const res = await request(app)
       .post(`/api/orders/${orderId}/confirm-order`)
@@ -252,7 +248,6 @@ describe("POST /api/orders/:id/confirm-order — happy path", () => {
     const order = await adminAgent.post("/api/orders");
     const orderId = order.body.id as string;
     const iKey = makeUUID();
-    await syncOrderToDb(orderId);
 
     const payload = {
       idempotencyKey: iKey,
@@ -293,7 +288,6 @@ describe("GET /api/orders/:id/order-items", () => {
     const order = await adminAgent.post("/api/orders");
     const orderId = order.body.id as string;
     const iKey = makeUUID();
-    await syncOrderToDb(orderId);
 
     await request(app)
       .post(`/api/orders/${orderId}/confirm-order`)

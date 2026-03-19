@@ -49,19 +49,6 @@ export async function cleanupTestProducts(ids: number[]): Promise<void> {
   await db.delete(products).where(inArray(products.id, ids));
 }
 
-/**
- * Inserts an order row into the PostgreSQL `orders` table to satisfy the FK
- * constraint on `order_items.order_id`. The MemStorage layer only keeps orders
- * in-memory; without this, confirm-order inserts would always fail the FK check.
- */
-export async function syncOrderToDb(orderId: string): Promise<void> {
-  const db = getDb();
-  await db
-    .insert(orders)
-    .values({ id: orderId })
-    .onConflictDoNothing();
-}
-
 export async function cleanupOrderData(orderId: string): Promise<void> {
   const db = getDb();
   await db.delete(idempotencyKeys).where(eq(idempotencyKeys.orderId, orderId));
