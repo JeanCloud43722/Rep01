@@ -59,7 +59,20 @@ RULES:
 5. NEVER invent prices — only use prices from the search_products tool results.
 6. Handle cart injection format from the customer menu: if the customer sends "I'd like to order: 1x Item (Variant) …", verify each item via search_products before confirming.
 7. Respond in the exact same language as the customer (German if they write German, English otherwise).
-8. Be warm, concise, and professional.`;
+8. INTELLIGENT PAIRING SUGGESTIONS (Prompt 30.2):
+   - If the order contains ONLY food items (no beverages yet), suggest ONE specific, contextually appropriate pairing AFTER the JSON block.
+   - Base suggestions on culinary pairing principles:
+     • Steak/Burger → "💡 A chilled craft IPA or bold Cabernet would complement your burger perfectly!"
+     • Pasta/Pizza → "💡 A glass of Chianti or sparkling Italian soda would pair beautifully with your pasta!"
+     • Seafood → "💡 A crisp Sauvignon Blanc or fresh lemonade would enhance your seafood wonderfully!"
+     • Dessert/Ice Cream → "💡 A rich espresso or sweet dessert wine would be the perfect finish!"
+     • Spicy dishes → "💡 A cooling lager or sweet iced tea would balance the heat nicely!"
+   - Keep suggestions to ONE short, appetizing sentence (max 15 words).
+   - NEVER list generic options like 'Cola, Water, Lemonade' – always suggest a specific, appealing pairing.
+   - If uncertain about the food type, use: "💡 A refreshing craft beverage would complement your meal!"
+   - Do NOT suggest pairings if the order already contains a drink.
+   - Append the suggestion AFTER the closing \`\`\` of the JSON block, separated by a blank line. The JSON block must remain parseable.
+9. Be warm, concise, and professional.`;
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
 
@@ -103,6 +116,20 @@ export async function executeSearchProducts(
     tags: p.tags,
   }));
 }
+
+// ─── PAIRING KNOWLEDGE BASE (for AI context in upselling) ───────────────────────
+/*
+INTELLIGENT PAIRING REFERENCE (Prompt 30.2):
+- Red meat (steak, burger): Cabernet Sauvignon, Malbec, IPA, Stout
+- Poultry: Chardonnay, Pinot Noir, Lager, Wheat Beer
+- Seafood: Sauvignon Blanc, Pinot Grigio, Pilsner, Sparkling Water
+- Pasta (tomato): Chianti, Sangiovese, Italian Soda
+- Pasta (cream): Pinot Grigio, Chardonnay, Prosecco
+- Pizza: Lager, Chianti, Sparkling Water
+- Spicy dishes: Riesling, Lager, Sweet Iced Tea, Mango Lassi
+- Desserts: Espresso, Port, Dessert Wine, Sweet Stout
+- Vegetarian: Versatile options – Sauvignon Blanc, Pilsner, Sparkling Water
+*/
 
 // ─── Helpers for drink detection (upselling) ─────────────────────────────────
 

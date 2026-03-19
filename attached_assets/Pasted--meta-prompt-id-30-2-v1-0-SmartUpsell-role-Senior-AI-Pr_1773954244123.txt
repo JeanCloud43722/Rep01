@@ -1,0 +1,118 @@
+{
+  "meta": {
+    "prompt_id": "30.2-v1.0-SmartUpsell",
+    "role": "Senior AI Prompt Engineer",
+    "purpose": "Replace generic drink upsell with intelligent, context-aware pairing suggestions based on ordered food items",
+    "prerequisites": ["Prompt 29: AI Chat Ordering with SYSTEM_PROMPT in server/lib/prompts.ts"],
+    "scope": "STRICTLY: Update SYSTEM_PROMPT upselling logic only – no other chat flow changes"
+  },
+  
+  "critical_directive": "⚠️ SENIOR ENGINEER MODE: This is a PROMPT-ONLY change. Do NOT modify backend logic, frontend components, or database schemas. Only refine the SYSTEM_PROMPT upselling instruction to enable intelligent pairing suggestions.",
+  
+  "project_context": {
+    "name": "Bistro Buzzer",
+    "ai_model": "DeepSeek Chat (OpenAI-compatible API)",
+    "existing_upsell_logic": "If order contains only food, append: '💡 Would you like to add a drink? We have Cola, Water, and fresh Lemonade.'"
+  },
+  
+  "objective": "Transform generic upselling into intelligent, context-aware pairing suggestions that increase average order value while feeling helpful, not pushy.",
+  
+  "deliverables": [
+    {
+      "file": "server/lib/prompts.ts",
+      "task": "Replace static upsell instruction with dynamic, context-aware pairing logic",
+      "code_requirements": [
+        "// Locate the upselling section in SYSTEM_PROMPT and REPLACE with:",
+        "",
+        "6. INTELLIGENT PAIRING SUGGESTIONS:",
+        "   - If the order contains ONLY food items (no beverages), suggest ONE specific, contextually appropriate pairing BEFORE finalizing the JSON.",
+        "   - Base suggestions on culinary pairing principles:",
+        "     • Steak/Burger → '💡 A chilled craft IPA or bold Cabernet would complement your burger perfectly!'",
+        "     • Pasta/Pizza → '💡 A glass of Chianti or sparkling Italian soda would pair beautifully with your pasta!'",
+        "     • Seafood → '💡 A crisp Sauvignon Blanc or fresh lemonade would enhance your seafood wonderfully!'",
+        "     • Dessert/Ice Cream → '💡 A rich espresso or sweet dessert wine would be the perfect finish!'",
+        "     • Spicy dishes → '💡 A cooling lager or sweet iced tea would balance the heat nicely!'",
+        "   - Keep suggestions to ONE short, appetizing sentence (max 15 words).",
+        "   - NEVER list generic options like 'Cola, Water, Lemonade' – always suggest a specific, appealing pairing.",
+        "   - If uncertain about the food type, use a versatile suggestion: '💡 A refreshing craft beverage would complement your meal!'",
+        "   - Do NOT suggest pairings if the order already contains a drink.",
+        "   - Append the suggestion AFTER the JSON block, separated by a blank line.",
+        "",
+        "// Example output format:",
+        "```json",
+        "{\"intent\":\"order\",\"items\":[...]}",
+        "```",
+        "",
+        "💡 A chilled Pinot Grigio would pair perfectly with your pasta!",
+        "",
+        "// CRITICAL: The JSON block must remain parseable – the suggestion comes AFTER the closing ```"
+      ]
+    },
+    {
+      "file": "server/lib/prompts.ts (optional enhancement)",
+      "task": "Add pairing knowledge base as comment for AI context (not executed, just guidance)",
+      "code_requirements": [
+        "// Optional: Add as comment block in prompts.ts for AI reference",
+        "/*",
+        "PAIRING KNOWLEDGE BASE (for AI context):",
+        "- Red meat (steak, burger): Cabernet Sauvignon, Malbec, IPA, Stout",
+        "- Poultry: Chardonnay, Pinot Noir, Lager, Wheat Beer",
+        "- Seafood: Sauvignon Blanc, Pinot Grigio, Pilsner, Sparkling Water",
+        "- Pasta (tomato): Chianti, Sangiovese, Italian Soda",
+        "- Pasta (cream): Pinot Grigio, Chardonnay, Prosecco",
+        "- Pizza: Lager, Chianti, Sparkling Water",
+        "- Spicy dishes: Riesling, Lager, Sweet Iced Tea, Mango Lassi",
+        "- Desserts: Espresso, Port, Dessert Wine, Sweet Stout",
+        "- Vegetarian: Versatile options – Sauvignon Blanc, Pilsner, Sparkling Water",
+        "*/"
+      ]
+    }
+  ],
+  
+  "testing_checkpoints": [
+    {
+      "step": 1,
+      "command": "Chat: \"I want a large pepperoni pizza\"",
+      "expected": "AI outputs valid JSON confirmation block + ONE specific pairing suggestion (e.g., '💡 A chilled Chianti would pair perfectly with your pepperoni pizza!') – NOT generic 'Cola, Water'"
+    },
+    {
+      "step": 2,
+      "command": "Chat: \"I want a steak and a cola\"",
+      "expected": "AI outputs JSON confirmation block ONLY – no upsell suggestion because drink already included"
+    },
+    {
+      "step": 3,
+      "command": "Chat: \"I want pasta carbonara\"",
+      "expected": "AI suggests cream-pasta appropriate pairing (e.g., Pinot Grigio or Prosecco), not red wine"
+    },
+    {
+      "step": 4,
+      "command": "Chat: \"I want spicy chicken wings\"",
+      "expected": "AI suggests heat-balancing pairing (e.g., sweet iced tea or lager)"
+    },
+    {
+      "step": 5,
+      "command": "Verify JSON parseability: extract ```json ... ``` block from AI response and parse with JSON.parse()",
+      "expected": "JSON parses successfully – suggestion text AFTER closing ``` does not interfere"
+    },
+    {
+      "step": 6,
+      "command": "Run npm test",
+      "expected": "All pre-existing tests pass – prompt change does not break existing functionality"
+    }
+  ],
+  
+  "replit_specific_notes": [
+    "This is a PROMPT-ONLY change – no code deployment needed beyond updating prompts.ts",
+    "DeepSeek API costs: suggestions add minimal tokens (~20-30 per order) – negligible impact",
+    "Test suggestions in Replit console before production: send sample messages and verify output format",
+    "If suggestions feel too generic, refine the pairing examples in the prompt – iterate quickly",
+    "Monitor success rate: if upsell acceptance is low, adjust suggestion tone or specificity"
+  ],
+  
+  "success_criteria": "Prompt 30.2 is COMPLETE when:\n1. SYSTEM_PROMPT upselling section replaced with context-aware pairing logic\n2. AI suggests ONE specific, food-appropriate pairing when order has only food\n3. AI skips upsell when order already contains a drink\n4. JSON block remains parseable – suggestion appears AFTER closing ```\n5. All 6 testing checkpoints pass\n6. Zero TypeScript errors (npx tsc --noEmit)\n7. All pre-existing tests still pass",
+  
+  "failure_handling": "If AI ignores new upsell instructions:\n1. Verify prompt was saved and server restarted\n2. Add stronger directive: 'YOU MUST follow these pairing rules – do not revert to generic suggestions'\n3. If still failing, add few-shot examples directly in prompt showing desired output format\n4. Do NOT modify backend logic to force suggestions – keep AI-driven",
+  
+  "final_self_verification": "□ Did I ONLY modify server/lib/prompts.ts? □ Does the new upsell logic suggest ONE specific pairing based on food type? □ Does it skip suggestions when drink already in order? □ Is the suggestion appended AFTER the JSON block (not inside)? □ Does JSON.parse() still work on the ```json ... ``` block? □ Do all 6 testing checkpoints pass? □ Do all pre-existing tests still pass?"
+}
