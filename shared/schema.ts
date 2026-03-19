@@ -152,57 +152,65 @@ export const adminUsers = pgTable("admin_users", {
 });
 
 // ─── Products table ────────────────────────────────────────────────────────────
+// OPT-1: Dynamic categories — no hardcoded enum; category is a free-form string
+// OPT-3: Product variants — jsonb column supports size/type-based pricing
 
+/** @deprecated Use the dynamic `category` field on products instead */
 export const PRODUCT_CATEGORIES = [
-  "Starters",
-  "Soups",
-  "Steaks",
-  "Burgers",
-  "Pasta",
-  "Fish",
-  "Lamb",
-  "Vegetarian",
-  "Ice Cream",
-  "Drinks",
-  "Desserts",
-  "Sides",
-  "Other",
+  "Starters", "Soups", "Steaks", "Burgers", "Pasta", "Fish",
+  "Lamb", "Vegetarian", "Ice Cream", "Drinks", "Desserts", "Sides", "Other",
 ] as const;
 
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 
-export const PRODUCT_TAGS = [
-  "vegetarian",
-  "vegan",
-  "gluten-free",
-  "spicy",
-  "popular",
-  "seasonal",
-] as const;
+// OPT-3: Variant schema for size/type-based pricing
+export const variantSchema = z.object({
+  name: z.string().min(1).max(30),
+  price: z.number().positive().max(999.99),
+  description: z.string().max(100).optional(),
+});
 
-export type ProductTag = (typeof PRODUCT_TAGS)[number];
+export type ProductVariant = z.infer<typeof variantSchema>;
 
+// OPT-1 + OPT-2 + OPT-3: Dynamic, SaaS-generic product schema
 export const productSchema = z.object({
-  name: z.string().min(1).max(150),
+  name: z.string().min(1).max(150).transform((s) => s.trim()),
   description: z.string().max(500).nullable().optional(),
-  price: z.number().positive().max(9999.99),
-  category: z.enum(PRODUCT_CATEGORIES),
+  // OPT-1: Category is a free-form string (lowercase-normalised), not an enum
+  category: z.string().min(1).max(50).transform((s) => s.trim().toLowerCase()),
+  categoryGroup: z.string().max(50).optional(),
+  // OPT-3: price is optional when variants are provided
+  price: z.number().positive().max(999.99).optional(),
+  variants: z.array(variantSchema).optional(),
+  defaultVariant: z.string().optional(),
   allergens: z.array(z.string()).default([]),
-  tags: z.array(z.enum(PRODUCT_TAGS)).default([]),
+  tags: z.array(z.string()).default([]),
   image_url: z.string().url().nullable().optional(),
   source: z.string().optional(),
-});
+  // OPT-2: fuzzy deduplication — DeepSeek may return an existing product ID
+  existingProductId: z.number().int().positive().optional(),
+}).refine(
+  (data) => data.price !== undefined || (data.variants && data.variants.length > 0),
+  { message: "Product must have either price or variants" }
+);
 
 export type ProductInput = z.infer<typeof productSchema>;
 
+// ─── Drizzle products table ────────────────────────────────────────────────────
 export const products = pgTable(
   "products",
   {
     id: serial("id").primaryKey(),
     name: text("name").notNull(),
     description: text("description"),
-    price: numeric("price", { precision: 10, scale: 2 }).notNull(),
+    // Nullable: variant-only products do not have a single price
+    price: numeric("price", { precision: 10, scale: 2 }),
+    // OPT-1: free-form string, no enum constraint
     category: text("category").notNull(),
+    categoryGroup: text("category_group"),
+    // OPT-3: JSONB variants column
+    variants: jsonb("variants").$type<Array<{ name: string; price: number; description?: string }>>(),
+    defaultVariant: text("default_variant"),
     allergens: text("allergens").array().notNull().default(sql`'{}'::text[]`),
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     imageUrl: text("image_url"),
@@ -213,6 +221,7 @@ export const products = pgTable(
   (t) => [
     index("products_name_idx").on(t.name),
     index("products_category_idx").on(t.category),
+    index("products_cat_group_idx").on(t.category, t.categoryGroup),
     uniqueIndex("products_name_category_idx").on(t.name, t.category),
   ]
 );

@@ -19,7 +19,8 @@ import { aiRateLimiter } from "./middleware/rate-limit";
 import { retrieveRelevantChunks, getChunkCount } from "./lib/knowledge-base/retriever";
 import { processKnowledgeBase } from "./lib/knowledge-base/processor";
 import { webSearch } from "./lib/web-search";
-import { products, PRODUCT_CATEGORIES } from "../shared/schema";
+import { products } from "../shared/schema";
+import { eventBus, type MenuEvent } from "./lib/event-bus";
 import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
@@ -75,7 +76,7 @@ const orderSubscribers = new Map<string, Set<any>>();
 const adminSubscribers = new Set<any>();
 
 // Event types for differentiated notifications
-type OrderEventType = "message" | "order_ready" | "service_request" | "offer" | "status_update" | "new_registration" | "order_completed";
+type OrderEventType = "message" | "order_ready" | "service_request" | "offer" | "status_update" | "new_registration" | "order_completed" | "order_reactivated";
 
 async function sendSinglePushNotification(orderId: string, message?: string, notificationNumber: number = 1) {
   const order = await storage.getOrder(orderId);
@@ -493,7 +494,32 @@ export async function registerRoutes(
   adminWss.on("close", () => {
     clearInterval(adminHeartbeat);
   });
-  
+
+  // OPT-4: Broadcast MENU_UPDATED events to all connected WebSocket clients
+  eventBus.on("menu:updates", (event: MenuEvent) => {
+    const message = JSON.stringify(event);
+    let customerCount = 0;
+    let adminCount = 0;
+    wss.clients.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(message);
+        customerCount++;
+      }
+    });
+    adminSubscribers.forEach((ws) => {
+      if (ws.readyState === 1) {
+        ws.send(message);
+        adminCount++;
+      }
+    });
+    logger.info("Menu event broadcast", {
+      source: "ws",
+      eventType: event.type,
+      customers: customerCount,
+      admins: adminCount,
+    });
+  });
+
   app.get("/api/health", async (_req, res) => {
     const dbStart = Date.now();
     let dbConnected = false;
@@ -1076,14 +1102,19 @@ export async function registerRoutes(
   // ── Products catalog ──
   app.get("/api/products", async (req, res) => {
     try {
-      const { category, search, tags, limit: limitRaw } = req.query as Record<string, string | undefined>;
+      const { category, categoryGroup, search, tags, limit: limitRaw } = req.query as Record<string, string | undefined>;
       const limit = Math.min(parseInt(limitRaw ?? "100", 10) || 100, 200);
 
       const db = getDb();
       const conditions: ReturnType<typeof eq>[] = [];
 
-      if (category && PRODUCT_CATEGORIES.includes(category as never)) {
-        conditions.push(eq(products.category, category));
+      // OPT-1: accept any category string (dynamic, no hardcoded enum check)
+      if (category) {
+        conditions.push(eq(products.category, category.toLowerCase()));
+      }
+
+      if (categoryGroup) {
+        conditions.push(eq(products.categoryGroup, categoryGroup) as ReturnType<typeof eq>);
       }
 
       if (search) {
@@ -1105,10 +1136,21 @@ export async function registerRoutes(
         ? rows.filter((r) => tagList.every((tag) => (r.tags ?? []).includes(tag)))
         : rows;
 
-      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=60");
+      // ETag based on product count + latest updatedAt for efficient cache validation
+      const latestUpdate = filtered.reduce((max, r) => {
+        const t = r.updatedAt?.getTime() ?? 0;
+        return t > max ? t : max;
+      }, 0);
+      const etag = `"${filtered.length}-${latestUpdate}"`;
+      res.setHeader("ETag", etag);
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=30");
       res.json({
         products: filtered,
-        meta: { total: filtered.length, filters: { category, search, tags }, limit },
+        meta: { total: filtered.length, filters: { category, categoryGroup, search, tags }, limit },
       });
     } catch (error) {
       logger.error("Products fetch error", { source: "products", error: (error as Error).message });

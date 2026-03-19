@@ -29,6 +29,9 @@ The system features a responsive UI built with Shadcn/ui and Tailwind CSS. It in
 - **Notification Orchestration**: Routes WebSocket events to appropriate audio, visual, and haptic channels, including throttling, tab badge updates, and role-aware audio.
 - **Device Capability Detection**: Identifies platform (iOS Safari, Android, Desktop) and feature support (Web Audio, Push, Notifications, Vibration, Screen Wake) to select optimal notification strategies.
 - **AI Guest Assistant**: Features an in-memory TF-IDF retrieval system for a knowledge base, optional web search integration, and DeepSeek AI for generating concise answers with source citations.
+- **Product Catalog Extraction (v2.0)**: Six-optimization pipeline: (1) dynamic categories from PDF section headers (no hardcoded enum), (2) fuzzy deduplication with existing-product context sent to DeepSeek, (3) product variants support (JSONB, size/type-based pricing), (4) WebSocket MENU_UPDATED broadcast via in-process event bus after extraction, (5) fire-and-forget async image generation (Stability AI, rate-limited to 5/run), (6) zero TypeScript errors via `types/global.d.ts` for pdf-parse.
+- **Event Bus**: `server/lib/event-bus.ts` — Node.js EventEmitter singleton for in-process pub/sub (`menu:updates` channel). Routes.ts subscribes and forwards events to all customer + admin WebSocket clients.
+- **Real-time Product Catalog Hook**: `client/src/hooks/use-product-catalog.ts` — React hook that connects to `/ws/admin`, listens for `MENU_UPDATED`/`PRODUCT_IMAGE_ADDED` events, and auto-invalidates the TanStack Query products cache.
 
 ### Feature Specifications
 - **Order Status Flow**: `waiting` -> `subscribed` -> `scheduled` -> `notified` -> `completed`. Supports `reactivation` for multi-round orders (e.g., appetizer, main, dessert).
@@ -37,6 +40,8 @@ The system features a responsive UI built with Shadcn/ui and Tailwind CSS. It in
 - **Bidirectional Messaging**: Customers can send messages to staff, appearing real-time on the admin dashboard via WebSocket, unifying message history.
 - **Offline Capabilities**: IndexedDB for message persistence, especially addressing iOS data eviction, and Service Worker caching for offline access.
 - **QR Code Scanning**: Uses `html5-qrcode` for live scanning with photo upload fallback for iOS.
+- **Product Catalog**: `GET /api/products` with `category`, `categoryGroup`, `search`, `tags`, `limit` query params; ETag + 304 support; category accepts any free-form string (no enum restriction).
+- **Product Extraction CLI**: `npx tsx scripts/extract-products.ts [--dry-run] [--skip-images] [--category <name>]`
 
 ## External Dependencies
 
