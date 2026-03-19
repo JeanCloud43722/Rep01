@@ -17,7 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,6 +45,7 @@ import {
   Settings
 } from "lucide-react";
 import QRCode from "qrcode";
+import { ActivityFeed, AppEvent } from "@/components/admin/ActivityFeed";
 
 type OrderWithMeta = Order & { totalMessages: number };
 type PaginatedOrdersResponse = { orders: OrderWithMeta[]; total: number; limit: number; offset: number };
@@ -1102,6 +1103,11 @@ export default function AdminPage() {
   const [isAdminMuted, setIsAdminMuted] = useState(() => localStorage.getItem("admin_muted") === "true");
   const isAdminMutedRef = useRef(isAdminMuted);
   useEffect(() => { isAdminMutedRef.current = isAdminMuted; }, [isAdminMuted]);
+
+  // ── ACTIVITY FEED STATE ──
+  const [feedEvents, setFeedEvents] = useState<AppEvent[]>([]);
+  const [isFeedOpen, setIsFeedOpen] = useState(false);
+  const [unreadEventCount, setUnreadEventCount] = useState(0);
   const toggleAdminMute = useCallback(() => {
     setIsAdminMuted((prev) => {
       const next = !prev;
@@ -1204,12 +1210,25 @@ export default function AdminPage() {
       // Invalidate only the specific order's items query — no sound/vibration for order confirmations
       if (orderId) {
         queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId, "order-items"] });
+        addActivityEvent("order_confirmed", orderId);
       }
       return;
     }
     playStaffSound(eventType as "service_request" | "new_registration" | "order_completed" | "message");
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     showEventToast(eventType, orderId);
+    
+    // Add to activity feed
+    if (eventType === "message") {
+      addActivityEvent("message", orderId);
+    } else if (eventType === "service_request") {
+      addActivityEvent("service_request", orderId);
+    } else if (eventType === "order_completed") {
+      addActivityEvent("order_completed", orderId);
+    } else if (eventType === "new_registration") {
+      addActivityEvent("order_created", orderId);
+    }
+    
     queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
     queryClient.refetchQueries({ queryKey: ["/api/orders"] });
   });
@@ -1428,6 +1447,29 @@ export default function AdminPage() {
   const handleSaveNotes = (orderId: string, notes: string) => {
     updateNotesMutation.mutate({ orderId, notes });
   };
+
+  const handleActivityEventClick = (event: AppEvent) => {
+    // Mark event as read
+    setFeedEvents((prev) =>
+      prev.map((e) => (e.id === event.id ? { ...e, read: true } : e))
+    );
+    setUnreadEventCount((prev) => Math.max(0, prev - 1));
+
+    // Open relevant modal based on event type
+    if (event.type === "message") {
+      setMessageOrderId(event.orderId);
+    } else if (event.type === "service_request") {
+      // Find the order and highlight it (could also open a modal in the future)
+      setSelectedOrder(
+        [...(activeQuery.data?.orders ?? []), ...(completedQuery.data?.orders ?? [])].find(
+          (o) => o.id === event.orderId
+        ) ?? null
+      );
+    }
+
+    // Close the feed
+    setIsFeedOpen(false);
+  };
   
   const activeOrders = activeQuery.data?.orders ?? [];
   const completedOrders = completedQuery.data?.orders ?? [];
@@ -1482,6 +1524,50 @@ export default function AdminPage() {
     return order.serviceRequests.some(req => req.acknowledgedAt === null);
   }, []);
 
+  // ── ACTIVITY FEED HELPERS ──
+  const getEventTitle = useCallback((type: string, data?: Record<string, any>): string => {
+    switch (type) {
+      case "service_request":
+        return "Service Request";
+      case "message":
+        return `New Message from Customer`;
+      case "new_registration":
+        return "New Customer Registered";
+      case "order_completed":
+        return "Order Marked Complete";
+      case "order_confirmed":
+        return "Order Items Confirmed";
+      default:
+        return "Activity Update";
+    }
+  }, []);
+
+  const getEventPreview = useCallback((type: string, data?: Record<string, any>): string => {
+    if (type === "message" && data?.message) {
+      return data.message.slice(0, 60) + (data.message.length > 60 ? "..." : "");
+    }
+    if (type === "service_request") {
+      return "Customer requested assistance";
+    }
+    return "";
+  }, []);
+
+  const addActivityEvent = useCallback((type: string, orderId: string, data?: Record<string, any>) => {
+    const newEvent: AppEvent = {
+      id: `${type}-${orderId}-${Date.now()}`,
+      type: (type === "message" || type === "service_request" || type === "order_confirmed" ? type : "order_status") as AppEvent["type"],
+      orderId,
+      title: getEventTitle(type, data),
+      preview: getEventPreview(type, data),
+      timestamp: new Date().toISOString(),
+      read: false,
+      meta: data,
+    };
+    
+    setFeedEvents((prev) => [newEvent, ...prev].slice(0, 50));
+    setUnreadEventCount((prev) => prev + 1);
+  }, [getEventTitle, getEventPreview]);
+
   if (meLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1520,6 +1606,30 @@ export default function AdminPage() {
               <Volume2 className="h-3 w-3 mr-1" />
               {audioEnabled ? "Sound On" : "Tap to enable sound"}
             </Badge>
+            
+            {/* Activity Feed Bell Button */}
+            <div className="relative">
+              <Button 
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setIsFeedOpen(true);
+                  // Mark all as read when opening
+                  setFeedEvents(prev => prev.map(e => ({ ...e, read: true })));
+                  setUnreadEventCount(0);
+                }}
+                title="Activity Feed"
+                data-testid="button-activity-bell"
+              >
+                <Bell className="h-5 w-5" />
+              </Button>
+              {unreadEventCount > 0 && (
+                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center" data-testid={`badge-unread-count-${unreadEventCount}`}>
+                  {unreadEventCount > 9 ? "9+" : unreadEventCount}
+                </span>
+              )}
+            </div>
+            
             <Button 
               onClick={handleCreateOrder}
               disabled={createOrderMutation.isPending}
@@ -1725,6 +1835,13 @@ export default function AdminPage() {
         onClose={() => setNotesOrderId(null)}
         onSaveNotes={handleSaveNotes}
         initialNotes={[...activeOrders, ...completedOrders].find(o => o.id === notesOrderId)?.notes || ""}
+      />
+
+      <ActivityFeed
+        isOpen={isFeedOpen}
+        onOpenChange={setIsFeedOpen}
+        events={feedEvents}
+        onEventClick={handleActivityEventClick}
       />
     </div>
   );
