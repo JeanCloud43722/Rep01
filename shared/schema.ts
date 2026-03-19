@@ -7,6 +7,7 @@ import {
   serial,
   integer,
   numeric,
+  boolean,
   index,
   uniqueIndex,
   check,
@@ -188,6 +189,9 @@ export const productSchema = z.object({
   tags: z.array(z.string()).default([]),
   image_url: z.string().url().nullable().optional(),
   source: z.string().optional(),
+  // Prompt 30.1: Stock validation — defaults to true for availability
+  isActive: z.boolean().default(true),
+  deactivatedAt: z.string().datetime().optional().or(z.null()),
   // OPT-2: fuzzy deduplication — DeepSeek may return an existing product ID
   existingProductId: z.number().int().positive().optional(),
 }).refine(
@@ -216,6 +220,9 @@ export const products = pgTable(
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     imageUrl: text("image_url"),
     source: text("source"),
+    // Stock validation (Prompt 30.1): default true ensures all existing products remain available
+    isActive: boolean("is_active").notNull().default(true),
+    deactivatedAt: timestamp("deactivated_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -223,6 +230,7 @@ export const products = pgTable(
     index("products_name_idx").on(t.name),
     index("products_category_idx").on(t.category),
     index("products_cat_group_idx").on(t.category, t.categoryGroup),
+    index("products_active_idx").on(t.isActive),
     uniqueIndex("products_name_category_idx").on(t.name, t.category),
   ]
 );

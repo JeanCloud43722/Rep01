@@ -421,6 +421,19 @@ export function setupChatRoutes(app: Express): void {
           });
         }
 
+        // ────── CRITICAL: Stock validation (Prompt 30.1) ──────
+        if (product.isActive === false) {
+          return res.status(400).json({
+            error: {
+              code: "ITEM_UNAVAILABLE",
+              message: `${product.name} is no longer available`,
+              itemName: product.name,
+              productId: product.id,
+              deactivatedAt: product.deactivatedAt,
+            },
+          });
+        }
+
         const variantName = item.variant_name ? String(item.variant_name) : null;
         let resolvedPrice: number | null = null;
 

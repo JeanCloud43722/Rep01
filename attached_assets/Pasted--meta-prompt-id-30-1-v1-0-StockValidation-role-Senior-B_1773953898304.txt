@@ -1,0 +1,228 @@
+{
+  "meta": {
+    "prompt_id": "30.1-v1.0-StockValidation",
+    "role": "Senior Backend Engineer",
+    "purpose": "Prevent confirmation of orders containing unavailable/deleted products via real-time stock validation",
+    "prerequisites": ["Prompt 29: AI Chat Ordering with /confirm-order endpoint"],
+    "scope": "STRICTLY: Add isActive flag to products, validate during confirmation, handle error in frontend"
+  },
+  
+  "critical_directive": "⚠️ SENIOR ENGINEER MODE: This is a CRITICAL safety feature. Race conditions between menu updates and order confirmation MUST be prevented. Implement EXACTLY as specified – do not skip validation steps or weaken error handling.",
+  
+  "project_context": {
+    "name": "Bistro Buzzer",
+    "platform": "Replit (Node.js/Express, PostgreSQL/Neon, Drizzle ORM, TypeScript)",
+    "existing_contract": {
+      "confirm_order_payload": "{ items: [{ product_id, variant_name?, quantity, modifications? }], idempotencyKey }",
+      "error_response_format": "{ error: { code: string, message: string, details?: Record<string, any> } }"
+    }
+  },
+  
+  "objective": "Add real-time product availability validation to the /confirm-order endpoint to prevent orders for items that were deleted or marked inactive between cart injection and confirmation.",
+  
+  "deliverables": [
+    {
+      "file": "shared/db-schema.ts",
+      "task": "Add isActive flag to products table with proper default and index",
+      "code_requirements": [
+        "// Add to existing products table definition:",
+        "isActive: boolean('is_active').notNull().default(true),",
+        "",
+        "// Add index for fast availability filtering:",
+        "export const productsActiveIdx = index('products_active_idx').on(products.isActive);",
+        "",
+        "// Optional: add deactivatedAt for audit purposes:",
+        "deactivatedAt: timestamp('deactivated_at')"
+      ]
+    },
+    {
+      "file": "shared/schema.ts",
+      "task": "Update Zod schema to include isActive field for frontend consumption",
+      "code_requirements": [
+        "// Add to productSchema:",
+        "isActive: z.boolean().default(true),",
+        "deactivatedAt: z.string().datetime().optional().or(z.null())",
+        "",
+        "// Export updated type:",
+        "export type Product = z.infer<typeof productSchema>;"
+      ]
+    },
+    {
+      "file": "server/routes/orders.ts",
+      "task": "Add availability validation inside /confirm-order transaction",
+      "code_requirements": [
+        "// Inside the item validation loop in confirmOrder():",
+        "for (const item of items) {",
+        "  const product = await db.query.products.findFirst({",
+        "    where: eq(products.id, item.product_id)",
+        "  });",
+        "  ",
+        "  if (!product) {",
+        "    throw new Error(JSON.stringify({",
+        "      code: 'PRODUCT_NOT_FOUND',",
+        "      message: `Product ${item.product_id} not found`,",
+        "      productId: item.product_id",
+        "    }));",
+        "  }",
+        "  ",
+        "  // CRITICAL: Check availability",
+        "  if (product.isActive === false) {",
+        "    throw new Error(JSON.stringify({",
+        "      code: 'ITEM_UNAVAILABLE',",
+        "      message: `${product.name} is no longer available`,",
+        "      itemName: product.name,",
+        "      productId: product.id,",
+        "      deactivatedAt: product.deactivatedAt",
+        "    }));",
+        "  }",
+        "  ",
+        "  // ... rest of validation (price, variant, quantity)",
+        "}",
+        "",
+        "// Ensure the error is caught and formatted properly:",
+        "} catch (err: any) {",
+        "  if (err.message?.startsWith('{')) {",
+        "    // Parse structured error from throw above",
+        "    const structured = JSON.parse(err.message);",
+        "    return res.status(400).json({ error: structured });",
+        "  }",
+        "  // Handle other errors...",
+        "}"
+      ]
+    },
+    {
+      "file": "client/src/components/OrderConfirmation.tsx",
+      "task": "Handle ITEM_UNAVAILABLE error with user-friendly message and recovery option",
+      "code_requirements": [
+        "// Update the catch block in handleConfirm():",
+        "} catch (err: any) {",
+        "  setIsConfirming(false);",
+        "  ",
+        "  // Try to parse structured error from server",
+        "  let userMessage = err.message || 'Could not confirm order';",
+        "  let errorCode = null;",
+        "  ",
+        "  try {",
+        "    // Server sends JSON string inside Error message",
+        "    const errData = JSON.parse(err.message);",
+        "    errorCode = errData.code;",
+        "    ",
+        "    if (errorCode === 'ITEM_UNAVAILABLE') {",
+        "      userMessage = `Sorry, \"${errData.itemName}\" is no longer available. Please update your order.`;",
+        "    } else if (errorCode === 'PRODUCT_NOT_FOUND') {",
+        "      userMessage = 'An item in your order could not be found. Please review your selection.';",
+        "    }",
+        "  } catch {",
+        "    // Fallback if parsing fails",
+        "    console.warn('Error parsing server error:', err);",
+        "  }",
+        "  ",
+        "  setError(userMessage);",
+        "  ",
+        "  // If item unavailable, offer to refresh product list",
+        "  if (errorCode === 'ITEM_UNAVAILABLE') {",
+        "    // Invalidate products cache to fetch fresh availability",
+        "    queryClient.invalidateQueries({ queryKey: ['products'] });",
+        "    ",
+        "    // Optional: add action button to error UI",
+        "    setRecoveryAction({",
+        "      label: 'Refresh menu',",
+        "      onClick: () => {",
+        "        setError(null);",
+        "        onCancel(); // Close confirmation, return to catalog",
+        "      }",
+        "    });",
+        "  }",
+        "}",
+        "",
+        "// In the render: show recovery action if available",
+        "{error && (",
+        "  <div className=\"text-red-600 text-sm mb-3\" role=\"alert\">",
+        "    {error}",
+        "    {recoveryAction && (",
+        "      <button",
+        "        onClick={recoveryAction.onClick}",
+        "        className=\"ml-2 text-blue-600 hover:underline\"",
+        "      >",
+        "        {recoveryAction.label}",
+        "      </button>",
+        "    )}",
+        "  </div>",
+        ")}"
+      ]
+    },
+    {
+      "file": "client/src/lib/api.ts (or equivalent)",
+      "task": "Add typed error handling utility for structured API errors",
+      "code_requirements": [
+        "export type ApiError = {",
+        "  code: string;",
+        "  message: string;",
+        "  details?: Record<string, any>;",
+        "};",
+        "",
+        "export function parseApiError(err: any): ApiError {",
+        "  // Handle server-sent structured errors",
+        "  if (err?.error?.code) {",
+        "    return err.error;",
+        "  }",
+        "  // Handle JSON-string-in-Error pattern from Prompt 30.1",
+        "  if (typeof err?.message === 'string' && err.message.startsWith('{')) {",
+        "    try {",
+        "      return JSON.parse(err.message);",
+        "    } catch {",
+        "      // Fall through",
+        "    }",
+        "  }",
+        "  // Generic fallback",
+        "  return {",
+        "    code: 'UNKNOWN_ERROR',",
+        "    message: err?.message || 'An unexpected error occurred'",
+        "  };",
+        "}"
+      ]
+    }
+  ],
+  
+  "testing_checkpoints": [
+    {
+      "step": 1,
+      "command": "psql $DATABASE_URL -c \"UPDATE products SET is_active = false WHERE name = 'Test Item';\"",
+      "expected": "Product marked inactive in database"
+    },
+    {
+      "step": 2,
+      "command": "Via chat or cart: add 'Test Item' to order, proceed to confirmation, click 'Confirm'",
+      "expected": "OrderConfirmation shows error: 'Sorry, \"Test Item\" is no longer available. Please update your order.' + 'Refresh menu' button"
+    },
+    {
+      "step": 3,
+      "command": "Click 'Refresh menu', return to catalog, verify 'Test Item' is hidden or marked unavailable",
+      "expected": "ProductCard for inactive item shows 'Currently unavailable' badge or is filtered out"
+    },
+    {
+      "step": 4,
+      "command": "psql $DATABASE_URL -c \"UPDATE products SET is_active = true WHERE name = 'Test Item';\" then retry confirmation",
+      "expected": "Order confirms successfully"
+    },
+    {
+      "step": 5,
+      "command": "Run npm test",
+      "expected": "All pre-existing tests pass; no regression from availability validation"
+    }
+  ],
+  
+  "replit_specific_notes": [
+    "Drizzle schema changes: run `npm run db:push` to sync to Neon PostgreSQL",
+    "isActive default=true ensures existing products remain available after migration",
+    "Index on isActive enables fast filtering for catalog queries (optional optimization)",
+    "Error messages are user-facing – keep them clear and actionable",
+    "Recovery action (refresh menu) improves UX without forcing page reload"
+  ],
+  
+  "success_criteria": "Prompt 30.1 is COMPLETE when:\n1. products table has isActive boolean with default=true\n2. /confirm-order validates isActive and throws structured ITEM_UNAVAILABLE error\n3. OrderConfirmation parses error and shows user-friendly message with recovery option\n4. Query cache invalidation refreshes product list after availability error\n5. All 5 testing checkpoints pass\n6. Zero TypeScript errors (npx tsc --noEmit)\n7. All pre-existing tests still pass",
+  
+  "failure_handling": "If validation cannot be added to transaction:\n1. STOP and report blocker\n2. Suggest alternative: validate availability BEFORE starting transaction (slightly less race-safe but still protective)\n3. Do NOT skip validation entirely – this is a critical safety feature",
+  
+  "final_self_verification": "□ Did I add isActive to both Drizzle schema AND Zod schema? □ Does /confirm-order check isActive INSIDE the validation loop? □ Is the error thrown as JSON string for frontend parsing? □ Does OrderConfirmation parse the error and show actionable message? □ Is queryClient.invalidateQueries called on ITEM_UNAVAILABLE? □ Does npx tsc --noEmit return 0 errors? □ Do all 5 testing checkpoints pass? □ Do all pre-existing tests still pass?"
+}

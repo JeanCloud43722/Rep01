@@ -16,6 +16,7 @@ async function main() {
   try {
     await client.query("BEGIN");
 
+    // Prompt 29: order_items table
     await client.query(`
       CREATE TABLE IF NOT EXISTS order_items (
         id          SERIAL PRIMARY KEY,
@@ -36,6 +37,7 @@ async function main() {
     `);
     console.log("✓ order_items_order_idx index created / already exists");
 
+    // Prompt 29: idempotency_keys table
     await client.query(`
       CREATE TABLE IF NOT EXISTS idempotency_keys (
         key         TEXT PRIMARY KEY,
@@ -49,6 +51,30 @@ async function main() {
       CREATE INDEX IF NOT EXISTS idempotency_order_idx ON idempotency_keys (order_id)
     `);
     console.log("✓ idempotency_order_idx index created / already exists");
+
+    // Prompt 30.1: Stock validation columns for products
+    // Add isActive column if it doesn't exist
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'is_active') THEN
+          ALTER TABLE products ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT true;
+          CREATE INDEX products_active_idx ON products (is_active);
+        END IF;
+      END $$
+    `);
+    console.log("✓ is_active column added to products (if not already present)");
+
+    // Add deactivatedAt column if it doesn't exist
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'deactivated_at') THEN
+          ALTER TABLE products ADD COLUMN deactivated_at TIMESTAMP;
+        END IF;
+      END $$
+    `);
+    console.log("✓ deactivated_at column added to products (if not already present)");
 
     await client.query("COMMIT");
     console.log("\nMigration complete.");

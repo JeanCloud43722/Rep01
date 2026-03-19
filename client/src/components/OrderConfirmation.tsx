@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Loader2, ShoppingBag, X } from "lucide-react";
+import { CheckCircle2, Loader2, ShoppingBag, X, AlertCircle } from "lucide-react";
 
 // ─── Shared types (exported so guest-assistant can import them) ────────────────
 
@@ -53,6 +53,8 @@ function estimatedTotal(items: OrderPreviewItem[]): number {
 export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismiss }: Props) {
   const { toast } = useToast();
   const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recoveryAction, setRecoveryAction] = useState<{ label: string; onClick: () => void } | null>(null);
 
   const mutation = useMutation<ConfirmResponse, Error>({
     mutationFn: async () => {
@@ -82,12 +84,50 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
         onConfirmed();
       }
     },
-    onError: () => {
-      toast({
-        title: "Could not place order",
-        description: "Please try again or ask a staff member.",
-        variant: "destructive",
-      });
+    onError: (err: any) => {
+      setError(null);
+      setRecoveryAction(null);
+
+      let userMessage = "Could not place order. Please try again or ask a staff member.";
+      let errorCode: string | null = null;
+
+      // Try to parse structured error from server response
+      try {
+        if (err?.message) {
+          // Attempt to parse as JSON
+          const errData = JSON.parse(err.message);
+          errorCode = errData.code;
+
+          if (errorCode === "ITEM_UNAVAILABLE") {
+            userMessage = `Sorry, "${errData.itemName}" is no longer available. Please update your order.`;
+          } else if (errorCode === "PRODUCT_NOT_FOUND") {
+            userMessage = "An item in your order could not be found. Please review your selection.";
+          }
+        }
+      } catch {
+        // Fallback to generic message
+      }
+
+      setError(userMessage);
+
+      // For unavailable items, offer to refresh the product list
+      if (errorCode === "ITEM_UNAVAILABLE") {
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+        setRecoveryAction({
+          label: "Refresh menu",
+          onClick: () => {
+            setError(null);
+            setRecoveryAction(null);
+            onDismiss();
+          },
+        });
+      } else {
+        toast({
+          title: "Order failed",
+          description: userMessage,
+          variant: "destructive",
+        });
+      }
     },
   });
 
@@ -157,6 +197,28 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
           </div>
         ))}
       </div>
+
+      {error && (
+        <div
+          className="flex items-start gap-2 px-3 py-2 bg-destructive/10 text-destructive text-sm"
+          role="alert"
+          data-testid="order-confirmation-error"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p>{error}</p>
+            {recoveryAction && (
+              <button
+                onClick={recoveryAction.onClick}
+                className="mt-1 text-sm font-semibold underline hover:no-underline"
+                data-testid="button-recovery-action"
+              >
+                {recoveryAction.label}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-t bg-muted/40">
         <span className="text-xs text-muted-foreground">
