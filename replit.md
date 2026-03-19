@@ -26,6 +26,7 @@ The system features a responsive UI built with Shadcn/ui and Tailwind CSS. It in
 - **Logging**: Winston for structured logging with JSON output in production and colorized output in development.
 - **Environment Validation**: `server/env-validation.ts` ensures all required environment variables are set at startup.
 - **Real-time Communication**: WebSockets (`/ws/orders?id=:orderId` for customers, `/ws/admin` for admin) provide real-time updates with heartbeat/keep-alive, client ID management, exponential backoff reconnection, and Page Visibility API integration for robust cross-platform messaging.
+- **Web Push Notifications (Prompt 32)**: Fully restored push notification system with VAPID key support, permission request on user interaction, subscription management in PostgreSQL, and service worker handling. Push service (`server/lib/push-service.ts`), routes (`server/routes/push.ts`), and frontend manager (`client/src/lib/push-manager.ts`) enable reliable notifications even when the app is backgrounded. Service worker (`public/sw.js`) displays notifications with vibration, sound cues, and click handling.
 - **Audio Management**: A singleton `AudioManager` uses Web Audio API with pre-warmed AudioContext and handles resume on interaction/visibility.
 - **Notification Orchestration**: Routes WebSocket events to appropriate audio, visual, and haptic channels, including throttling, tab badge updates, and role-aware audio.
 - **Device Capability Detection**: Identifies platform (iOS Safari, Android, Desktop) and feature support (Web Audio, Push, Notifications, Vibration, Screen Wake) to select optimal notification strategies.
@@ -58,7 +59,7 @@ The system features a responsive UI built with Shadcn/ui and Tailwind CSS. It in
 ## External Dependencies
 
 - **PostgreSQL**: Used for persistent storage via Drizzle ORM and Neon serverless.
-- **Web-Push**: Node.js library for sending web push notifications.
+- **Web-Push** (Prompt 32): Node.js library (`web-push` v3.6.7+) for sending web push notifications with VAPID key support.
 - **Node-Schedule**: For scheduling future notifications.
 - **i18next & react-i18next**: For internationalization in the frontend.
 - **Shadcn/ui & Tailwind CSS**: UI component library and styling framework.

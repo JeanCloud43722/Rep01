@@ -22,6 +22,7 @@ import { webSearch } from "./lib/web-search";
 import { products } from "../shared/schema";
 import { eventBus, type MenuEvent, type OrderEvent } from "./lib/event-bus";
 import { setupChatRoutes } from "./routes/chat";
+import pushRoutes from "./routes/push";
 import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
@@ -540,6 +541,9 @@ export async function registerRoutes(
 
   // Register AI ordering chat routes
   setupChatRoutes(app);
+
+  // Register push notification routes
+  app.use(pushRoutes);
 
   // Hourly cleanup: remove idempotency keys older than 1 hour
   schedule.scheduleJob("0 * * * *", async () => {

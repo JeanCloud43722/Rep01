@@ -8,6 +8,7 @@ import { Loader2, Sparkles, ChevronDown, ChevronUp, ExternalLink, ShoppingBag } 
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { OrderConfirmation } from "./OrderConfirmation";
+import { PushManager } from "@/lib/push-manager";
 import type { OrderPreview } from "./OrderConfirmation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,12 +54,48 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder, onC
   const [isLoading, setIsLoading] = useState(false);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const answerEndRef = useRef<HTMLDivElement>(null);
+  const pushManagerRef = useRef<PushManager | null>(null);
 
   // Ordering mode: activated when pendingOrder cart injection arrives
   const [orderingMode, setOrderingMode] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   // Soft-lock: disable chat input while order confirmation is pending
   const [isConfirmationPending, setIsConfirmationPending] = useState(false);
+
+  // Initialize PushManager
+  useEffect(() => {
+    const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+    if (vapidKey) {
+      pushManagerRef.current = new PushManager(vapidKey);
+    }
+  }, []);
+
+  // Request push permission on user interaction
+  useEffect(() => {
+    const handleUserInteraction = async () => {
+      if (!pushManagerRef.current) return;
+
+      // Only request if not already decided
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        try {
+          await pushManagerRef.current.requestPermissionOnInteraction();
+        } catch (err) {
+          console.warn('[Push] Permission request failed:', err);
+        }
+      }
+
+      // Remove listeners after first interaction
+      const events = ['click', 'touchstart', 'keydown', 'scroll'];
+      events.forEach((evt) => window.removeEventListener(evt, handleUserInteraction));
+    };
+
+    const events = ['click', 'touchstart', 'keydown', 'scroll'];
+    events.forEach((evt) => window.addEventListener(evt, handleUserInteraction, { passive: true, once: true }));
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, handleUserInteraction));
+    };
+  }, []);
 
   useEffect(() => {
     if (answers.length > 0) {
