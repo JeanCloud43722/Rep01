@@ -24,9 +24,13 @@ interface Answer {
 
 interface GuestAssistantProps {
   orderId: string;
+  /** When set, auto-opens the assistant and pre-fills the question input (for cart injection). */
+  pendingOrder?: string | null;
+  /** Called after pendingOrder has been consumed so the parent can clear it. */
+  onClearPendingOrder?: () => void;
 }
 
-export function GuestAssistant({ orderId }: GuestAssistantProps) {
+export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: GuestAssistantProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -40,6 +44,15 @@ export function GuestAssistant({ orderId }: GuestAssistantProps) {
       answerEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [answers]);
+
+  // Cart injection: when a pending order arrives, open the assistant and pre-fill
+  useEffect(() => {
+    if (!pendingOrder) return;
+    setOpen(true);
+    setQuestion(pendingOrder);
+    onClearPendingOrder?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOrder]);
 
   async function handleAsk() {
     const trimmed = question.trim();
@@ -100,7 +113,7 @@ export function GuestAssistant({ orderId }: GuestAssistantProps) {
                 <div key={i} className="space-y-2">
                   {/* Question bubble */}
                   <div className="flex justify-end">
-                    <div className="bg-primary text-primary-foreground rounded-md px-3 py-2 text-sm max-w-[85%]">
+                    <div className="bg-primary text-primary-foreground rounded-md px-3 py-2 text-sm max-w-[85%] whitespace-pre-wrap">
                       {a.question}
                     </div>
                   </div>

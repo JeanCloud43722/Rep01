@@ -11,6 +11,7 @@ import { formatOrderId } from "@/lib/format-utils";
 import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
 import { GuestAssistant } from "@/components/guest-assistant";
+import { ProductCatalog } from "@/components/ProductCatalog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -325,6 +326,9 @@ export default function CustomerPage() {
   // ── connection state ──
   const [wsConnected, setWsConnected] = useState(false);
 
+  // ── pending order for AI assistant injection ──
+  const [pendingOrder, setPendingOrder] = useState<string | null>(null);
+
   // ── order data ──
   const [hasRegistered, setHasRegistered] = useState(false);
   const [cachedOrder, setCachedOrder] = useState<Order | null>(null);
@@ -590,6 +594,8 @@ export default function CustomerPage() {
           queryClient.refetchQueries({ queryKey: ["/api/orders", orderId] });
         } else if (msg.type === "sync_response" && msg.order) {
           queryClient.setQueryData(["/api/orders", orderId], msg.order);
+        } else if (msg.type === "MENU_UPDATED" || msg.type === "PRODUCT_IMAGE_ADDED") {
+          queryClient.invalidateQueries({ queryKey: ["/api/products"] });
         }
       },
       onConnect: () => setWsConnected(true),
@@ -751,8 +757,22 @@ export default function CustomerPage() {
           isSending={sendMessageMutation.isPending}
         />
 
+        {/* Menu / Product Catalog */}
+        {orderId && (
+          <ProductCatalog
+            orderId={orderId}
+            onSendToChat={(msg) => setPendingOrder(msg)}
+          />
+        )}
+
         {/* AI Guest Assistant */}
-        {orderId && <GuestAssistant orderId={orderId} />}
+        {orderId && (
+          <GuestAssistant
+            orderId={orderId}
+            pendingOrder={pendingOrder}
+            onClearPendingOrder={() => setPendingOrder(null)}
+          />
+        )}
 
         {/* Status bar with mute toggle (T006) */}
         <div className="flex items-center justify-between px-1 text-xs">
