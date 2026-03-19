@@ -100,6 +100,8 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
   const config = getStatusConfig(order.status, t);
   const StatusIcon = config.icon;
   const [remaining, setRemaining] = useState("");
+  const [pendingOrder, setPendingOrder] = useState<string | null>(null);
+  const [isConfirmationPending, setIsConfirmationPending] = useState(false);
 
   useEffect(() => {
     if (!order.scheduledTime || order.status !== "scheduled") return;
@@ -762,6 +764,7 @@ export default function CustomerPage() {
           <ProductCatalog
             orderId={orderId}
             onSendToChat={(msg) => setPendingOrder(msg)}
+            isConfirmationPending={isConfirmationPending}
           />
         )}
 
@@ -771,6 +774,7 @@ export default function CustomerPage() {
             orderId={orderId}
             pendingOrder={pendingOrder}
             onClearPendingOrder={() => setPendingOrder(null)}
+            onConfirmationPendingChange={setIsConfirmationPending}
           />
         )}
 

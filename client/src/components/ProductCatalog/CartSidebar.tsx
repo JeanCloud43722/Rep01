@@ -13,6 +13,7 @@ interface CartSidebarProps {
   onRemoveItem: (productId: number, variantName: string | undefined) => void;
   onClear: () => void;
   onSendToChat: (message: string) => void;
+  isConfirmationPending?: boolean;
 }
 
 export function CartSidebar({
@@ -21,6 +22,7 @@ export function CartSidebar({
   onRemoveItem,
   onClear,
   onSendToChat,
+  isConfirmationPending,
 }: CartSidebarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -147,6 +149,7 @@ export function CartSidebar({
                 size="sm"
                 className="flex-1"
                 onClick={onClear}
+                disabled={isConfirmationPending}
                 data-testid="button-cart-clear"
                 aria-label="Clear all items from cart"
               >
@@ -156,13 +159,20 @@ export function CartSidebar({
                 size="sm"
                 className="flex-1 gap-1"
                 onClick={handleSendToChat}
+                disabled={cart.length === 0 || isConfirmationPending}
                 data-testid="button-cart-send"
                 aria-label="Send order to AI assistant for confirmation"
               >
                 <Send className="h-3.5 w-3.5" />
-                Send to Assistant
+                {isConfirmationPending ? "Confirmation Pending…" : "Send to Assistant"}
               </Button>
             </div>
+
+            {isConfirmationPending && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
+                Please confirm or cancel your pending order first
+              </p>
+            )}
           </CardContent>
         )}
       </Card>

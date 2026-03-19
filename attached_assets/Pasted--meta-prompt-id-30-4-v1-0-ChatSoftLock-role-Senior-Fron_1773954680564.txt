@@ -1,0 +1,239 @@
+{
+  "meta": {
+    "prompt_id": "30.4-v1.0-ChatSoftLock",
+    "role": "Senior Frontend Engineer",
+    "purpose": "Prevent users from injecting new items into chat while reviewing an order confirmation",
+    "prerequisites": ["Prompt 29: OrderConfirmation component renders in chat flow"],
+    "scope": "STRICTLY: Add UI state management to disable chat input during pending confirmation"
+  },
+  
+  "critical_directive": "⚠️ SENIOR ENGINEER MODE: This is a FRONTEND UX safeguard. Do NOT modify backend APIs or chat logic. Focus on clean state management and accessible disabled states.",
+  
+  "project_context": {
+    "name": "Bistro Buzzer",
+    "existing_components": ["guest-assistant.tsx (chat UI)", "OrderConfirmation.tsx (confirmation modal)", "CartSidebar.tsx (cart injection)"],
+    "user_flow": "User receives AI order preview → sees OrderConfirmation → must Confirm or Cancel before continuing chat"
+  },
+  
+  "objective": "Implement a soft-lock that disables chat input and cart injection while an order confirmation is pending, preventing conflicting orders and user confusion.",
+  
+  "deliverables": [
+    {
+      "file": "client/src/components/guest-assistant.tsx",
+      "task": "Detect pending confirmation and disable chat input with accessible feedback",
+      "code_requirements": [
+        "// Add state to track confirmation status:",
+        "const [isConfirmationPending, setIsConfirmationPending] = useState(false);",
+        "",
+        "// Update when AI message with order_preview arrives:",
+        "useEffect(() => {",
+        "  if (lastMessage?.sender === 'ai' && lastMessage?.order_preview && !lastMessage?.confirmed) {",
+        "    setIsConfirmationPending(true);",
+        "  } else if (lastMessage?.confirmed || lastMessage?.cancelled) {",
+        "    setIsConfirmationPending(false);",
+        "  }",
+        "}, [lastMessage]);",
+        "",
+        "// Disable chat textarea and send button when confirmation pending:",
+        "<textarea",
+        "  value={inputMessage}",
+        "  onChange={(e) => setInputMessage(e.target.value)}",
+        "  disabled={isConfirmationPending || isSending}",
+        "  placeholder={isConfirmationPending",
+        "    ? 'Please confirm or cancel your current order above.'",
+        "    : 'Type your message...'",
+        "  }",
+        "  className={`w-full p-3 rounded-xl border transition-all ${",
+        "    isConfirmationPending",
+        "      ? 'bg-gray-100 border-gray-300 cursor-not-allowed text-gray-500'",
+        "      : 'glass focus:ring-2 focus:ring-orange-500'",
+        "  }`}",
+        "  aria-disabled={isConfirmationPending}",
+        "  aria-describedby={isConfirmationPending ? 'confirmation-hint' : undefined}",
+        "/>",
+        "{isConfirmationPending && (",
+        "  <p id=\"confirmation-hint\" className=\"text-xs text-gray-500 mt-1\" role=\"status\">",
+        "    ✋ Order confirmation pending – please confirm or cancel first",
+        "  </p>",
+        ")}",
+        "",
+        "// Disable send button:",
+        "<button",
+        "  onClick={handleSend}",
+        "  disabled={isConfirmationPending || isSending || !inputMessage.trim()}",
+        "  className={`px-6 py-3 rounded-xl font-semibold transition-all ${",
+        "    isConfirmationPending || isSending || !inputMessage.trim()",
+        "      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'",
+        "      : 'bg-orange-500 hover:bg-orange-600 text-white'",
+        "  }`}",
+        "  aria-disabled={isConfirmationPending || isSending}",
+        ">",
+        "  {isSending ? 'Sending...' : 'Send'}",
+        "</button>",
+        "",
+        "// When OrderConfirmation is confirmed/cancelled, reset pending state:",
+        "// In the onConfirm/onCancel handlers passed to OrderConfirmation:",
+        "onConfirm={async (payload) => {",
+        "  // ... existing confirmation logic",
+        "  setIsConfirmationPending(false); // Reset after success",
+        "}}",
+        "onCancel={() => {",
+        "  setIsConfirmationPending(false); // Reset after cancel",
+        "  sendChatMessage(\"Actually, let me change my order.\"); // Optional: auto-send cancel message",
+        "}}"
+      ]
+    },
+    {
+      "file": "client/src/components/ProductCatalog/CartSidebar.tsx",
+      "task": "Disable 'Send Order to Chat' button when confirmation is pending",
+      "code_requirements": [
+        "// Accept isConfirmationPending as prop:",
+        "interface CartSidebarProps {",
+        "  // ... existing props",
+        "  isConfirmationPending?: boolean;",
+        "}",
+        "",
+        "// Disable the send button when confirmation pending:",
+        "<button",
+        "  onClick={handleSendToChat}",
+        "  disabled={cart.length === 0 || isConfirmationPending || !['waiting', 'subscribed'].includes(orderStatus)}",
+        "  className={`w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-4 px-6 rounded-xl transition-colors flex items-center justify-center gap-2`}",
+        "  aria-disabled={isConfirmationPending}",
+        ">",
+        "  <MessageCircle className=\"w-5 h-5\" />",
+        "  {isConfirmationPending ? 'Confirmation Pending...' : 'Send Order to Chat'}",
+        "</button>",
+        "",
+        "// Optional: show tooltip explaining why button is disabled:",
+        "{isConfirmationPending && (",
+        "  <div className=\"text-xs text-gray-500 mt-2 text-center\">",
+        "    Please confirm or cancel your pending order first",
+        "  </div>",
+        ")}"
+      ]
+    },
+    {
+      "file": "client/src/context/OrderContext.tsx (or equivalent)",
+      "task": "Provide global confirmation pending state for cross-component access",
+      "code_requirements": [
+        "// Create context for confirmation state:",
+        "interface OrderContextType {",
+        "  isConfirmationPending: boolean;",
+        "  setConfirmationPending: (pending: boolean) => void;",
+        "  // ... existing order context fields",
+        "}",
+        "",
+        "export const OrderContext = createContext<OrderContextType | undefined>(undefined);",
+        "",
+        "// In provider:",
+        "export function OrderProvider({ children }: { children: ReactNode }) {",
+        "  const [isConfirmationPending, setConfirmationPending] = useState(false);",
+        "  ",
+        "  // ... existing provider logic",
+        "  ",
+        "  return (",
+        "    <OrderContext.Provider value={{",
+        "      isConfirmationPending,",
+        "      setConfirmationPending,",
+        "      // ... spread existing values",
+        "    }}>",
+        "      {children}",
+        "    </OrderContext.Provider>",
+        "  );",
+        "}",
+        "",
+        "// Custom hook for easy access:",
+        "export function useOrderConfirmation() {",
+        "  const context = useContext(OrderContext);",
+        "  if (!context) {",
+        "    throw new Error('useOrderConfirmation must be used within OrderProvider');",
+        "  }",
+        "  return {",
+        "    isConfirmationPending: context.isConfirmationPending,",
+        "    setConfirmationPending: context.setConfirmationPending",
+        "  };",
+        "}"
+      ]
+    },
+    {
+      "file": "client/src/components/OrderConfirmation.tsx",
+      "task": "Notify parent when confirmation is resolved (confirmed/cancelled)",
+      "code_requirements": [
+        "// Add callbacks to notify when confirmation flow completes:",
+        "interface OrderConfirmationProps {",
+        "  // ... existing props",
+        "  onResolved?: (action: 'confirmed' | 'cancelled') => void;",
+        "}",
+        "",
+        "// In handleConfirm:",
+        "const handleConfirm = async () => {",
+        "  // ... existing confirmation logic",
+        "  try {",
+        "    await onConfirm(payload);",
+        "    onResolved?.('confirmed'); // Notify parent",
+        "  } catch {",
+        "    // Keep pending state if error occurs – user can retry",
+        "  }",
+        "};",
+        "",
+        "// In onCancel:",
+        "const handleCancel = () => {",
+        "  onCancel(); // existing cancel logic",
+        "  onResolved?.('cancelled'); // Notify parent",
+        "};"
+      ]
+    }
+  ],
+  
+  "testing_checkpoints": [
+    {
+      "step": 1,
+      "command": "Trigger OrderConfirmation in chat (via AI JSON response)",
+      "expected": "Chat textarea shows placeholder 'Please confirm or cancel your current order above.', is grayed out, and cannot receive input"
+    },
+    {
+      "step": 2,
+      "command": "Try to type in disabled chat textarea",
+      "expected": "No text appears; textarea has cursor: not-allowed and aria-disabled=true"
+    },
+      {
+      "step": 3,
+      "command": "Click 'Send Order to Chat' in CartSidebar while confirmation pending",
+      "expected": "Button is disabled, shows 'Confirmation Pending...' text, cannot be clicked"
+    },
+    {
+      "step": 4,
+      "command": "Click '✓ Confirm Order' in OrderConfirmation",
+      "expected": "Chat textarea re-enables immediately, placeholder returns to normal, cart send button re-enables"
+    },
+    {
+      "step": 5,
+      "command": "Click 'Change' (cancel) in OrderConfirmation",
+      "expected": "Chat textarea re-enables, optional auto-message 'Actually, let me change my order.' appears in chat"
+    },
+    {
+      "step": 6,
+      "command": "Test with screen reader (VoiceOver/NVDA)",
+      "expected": "Disabled textarea announces 'dimmed, please confirm or cancel your current order above'; aria-describedby hint is read"
+    },
+    {
+      "step": 7,
+      "command": "Run npm test",
+      "expected": "All pre-existing tests pass – no regression from soft-lock implementation"
+    }
+  ],
+  
+  "replit_specific_notes": [
+    "Disabled states use Tailwind's cursor-not-allowed and bg-gray-100 for clear visual feedback",
+    "aria-disabled and aria-describedby ensure accessibility compliance (WCAG 2.1)",
+    "Context pattern allows CartSidebar and guest-assistant to share confirmation state without prop drilling",
+    "Soft-lock is UI-only – backend still validates orders independently (defense in depth)",
+    "Auto-send cancel message is optional – can be disabled via feature flag if preferred"
+  ],
+  
+  "success_criteria": "Prompt 30.4 is COMPLETE when:\n1. Chat textarea is disabled with clear placeholder when confirmation pending\n2. Send button is disabled and shows appropriate text during pending state\n3. CartSidebar 'Send Order to Chat' button respects confirmation pending state\n4. Confirmation state is managed via Context for cross-component access\n5. OrderConfirmation notifies parent when resolved (confirmed/cancelled)\n6. Disabled states are accessible (aria-disabled, aria-describedby, screen reader tested)\n7. All 7 testing checkpoints pass\n8. Zero TypeScript errors (npx tsc --noEmit)\n9. All pre-existing tests still pass",
+  
+  "failure_handling": "If state management becomes complex:\n1. Simplify: keep confirmation pending state local to guest-assistant.tsx if Context feels heavy\n2. Ensure CartSidebar receives isConfirmationPending via props from parent (CustomerPage)\n3. Do NOT remove the soft-lock – it prevents critical UX confusion and order conflicts\n4. Document the state flow in a comment for future maintainers",
+  
+  "final_self_verification": "□ Is chat textarea disabled when confirmation pending? □ Does it show clear placeholder text? □ Is send button disabled with appropriate text? □ Does CartSidebar respect isConfirmationPending prop? □ Is confirmation state shared via Context or props? □ Does OrderConfirmation call onResolved when confirmed/cancelled? □ Are disabled states accessible (aria attributes)? □ Do all 7 testing checkpoints pass? □ Do all pre-existing tests still pass?"
+}

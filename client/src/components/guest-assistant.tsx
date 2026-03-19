@@ -39,11 +39,13 @@ interface GuestAssistantProps {
   pendingOrder?: string | null;
   /** Called after pendingOrder has been consumed so the parent can clear it. */
   onClearPendingOrder?: () => void;
+  /** Called when order confirmation pending state changes. */
+  onConfirmationPendingChange?: (isPending: boolean) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: GuestAssistantProps) {
+export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder, onConfirmationPendingChange }: GuestAssistantProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -55,6 +57,8 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
   // Ordering mode: activated when pendingOrder cart injection arrives
   const [orderingMode, setOrderingMode] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // Soft-lock: disable chat input while order confirmation is pending
+  const [isConfirmationPending, setIsConfirmationPending] = useState(false);
 
   useEffect(() => {
     if (answers.length > 0) {
@@ -141,6 +145,7 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
   }
 
   function handleOrderConfirmed() {
+    setIsConfirmationPending(false);
     setOrderingMode(false);
     setChatHistory([]);
   }
@@ -151,9 +156,18 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
         i === answerIndex ? { ...a, orderPreview: null } : a
       )
     );
+    setIsConfirmationPending(false);
     setOrderingMode(false);
     setChatHistory([]);
   }
+
+  // Track when order confirmation is pending (order preview shown)
+  useEffect(() => {
+    const lastAnswer = answers[answers.length - 1];
+    const isPending = !!(lastAnswer?.orderPreview && !lastAnswer.orderPreview.requires_clarification);
+    setIsConfirmationPending(isPending);
+    onConfirmationPendingChange?.(isPending);
+  }, [answers, onConfirmationPendingChange]);
 
   return (
     <Card>
@@ -261,6 +275,13 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
                           orderPreview={a.orderPreview}
                           onConfirmed={handleOrderConfirmed}
                           onDismiss={() => handleOrderDismissed(i)}
+                          onResolved={(action) => {
+                            if (action === "confirmed") {
+                              handleOrderConfirmed();
+                            } else {
+                              handleOrderDismissed(i);
+                            }
+                          }}
                         />
                       )}
                     </div>
@@ -278,21 +299,30 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                orderingMode
-                  ? "Describe your order or ask about menu items…"
-                  : t("ga.placeholder")
+                isConfirmationPending
+                  ? "Please confirm or cancel your current order above."
+                  : orderingMode
+                    ? "Describe your order or ask about menu items…"
+                    : t("ga.placeholder")
               }
-              className="resize-none text-sm min-h-[60px]"
+              className={`resize-none text-sm min-h-[60px] transition-all ${
+                isConfirmationPending
+                  ? "bg-gray-100 border-gray-300 text-gray-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
+                  : ""
+              }`}
               rows={2}
-              disabled={isLoading}
+              disabled={isLoading || isConfirmationPending}
               aria-label={t("ga.input_label")}
+              aria-disabled={isConfirmationPending}
+              aria-describedby={isConfirmationPending ? "confirmation-hint" : undefined}
               data-testid="input-guest-question"
             />
             <Button
               onClick={handleAsk}
-              disabled={!question.trim() || isLoading}
+              disabled={!question.trim() || isLoading || isConfirmationPending}
               size="default"
               aria-label={t("ga.send_label")}
+              aria-disabled={isConfirmationPending || isLoading}
               data-testid="button-guest-ask"
             >
               {isLoading ? (
@@ -302,6 +332,16 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
               )}
             </Button>
           </div>
+
+          {isConfirmationPending && (
+            <p
+              id="confirmation-hint"
+              className="text-xs text-gray-500 dark:text-gray-400 text-center"
+              role="status"
+            >
+              ✋ Order confirmation pending – please confirm or cancel first
+            </p>
+          )}
 
           <p className="text-xs text-muted-foreground text-center">{t("ga.disclaimer")}</p>
         </CardContent>

@@ -30,6 +30,7 @@ interface Props {
   orderPreview: OrderPreview;
   onConfirmed: () => void;
   onDismiss: () => void;
+  onResolved?: (action: "confirmed" | "cancelled") => void;
 }
 
 interface ConfirmResponse {
@@ -50,7 +51,7 @@ function estimatedTotal(items: OrderPreviewItem[]): number {
   return items.reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
 }
 
-export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismiss }: Props) {
+export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismiss, onResolved }: Props) {
   const { toast } = useToast();
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +78,13 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
         toast({ title: "Order already placed", description: "This order was already confirmed." });
         setConfirmed(true);
         onConfirmed();
+        onResolved?.("confirmed");
         return;
       }
       if (data.success) {
         setConfirmed(true);
         onConfirmed();
+        onResolved?.("confirmed");
       }
     },
     onError: (err: any) => {
@@ -119,6 +122,7 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
             setError(null);
             setRecoveryAction(null);
             onDismiss();
+            onResolved?.("cancelled");
           },
         });
       } else {
@@ -130,6 +134,11 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
       }
     },
   });
+
+  const handleDismiss = () => {
+    onDismiss();
+    onResolved?.("cancelled");
+  };
 
   if (confirmed) {
     return (
@@ -158,7 +167,7 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
         <Button
           size="icon"
           variant="ghost"
-          onClick={onDismiss}
+          onClick={handleDismiss}
           data-testid="button-dismiss-order-confirmation"
         >
           <X className="h-3.5 w-3.5" />
@@ -233,7 +242,7 @@ export function OrderConfirmation({ orderId, orderPreview, onConfirmed, onDismis
         <Button
           size="sm"
           variant="outline"
-          onClick={onDismiss}
+          onClick={handleDismiss}
           disabled={mutation.isPending}
           data-testid="button-cancel-order"
         >

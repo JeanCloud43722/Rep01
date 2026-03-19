@@ -14,6 +14,7 @@ import { loadCart, saveCart, fetchProducts } from "./types";
 export interface ProductCatalogProps {
   orderId: string;
   onSendToChat: (message: string) => void;
+  isConfirmationPending?: boolean;
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -25,7 +26,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced;
 }
 
-export function ProductCatalog({ orderId, onSendToChat }: ProductCatalogProps) {
+export function ProductCatalog({ orderId, onSendToChat, isConfirmationPending }: ProductCatalogProps) {
   const queryClient = useQueryClient();
 
   // ── category + search state ─────────────────────────────────────────────
@@ -281,6 +282,7 @@ export function ProductCatalog({ orderId, onSendToChat }: ProductCatalogProps) {
         onRemoveItem={handleRemoveItem}
         onClear={handleClearCart}
         onSendToChat={onSendToChat}
+        isConfirmationPending={isConfirmationPending}
       />
 
       {/* Product detail modal */}
