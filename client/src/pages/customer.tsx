@@ -100,8 +100,6 @@ function StatusCard({ order, onRequestService, isRequestingService }: {
   const config = getStatusConfig(order.status, t);
   const StatusIcon = config.icon;
   const [remaining, setRemaining] = useState("");
-  const [pendingOrder, setPendingOrder] = useState<string | null>(null);
-  const [isConfirmationPending, setIsConfirmationPending] = useState(false);
 
   useEffect(() => {
     if (!order.scheduledTime || order.status !== "scheduled") return;
@@ -330,6 +328,9 @@ export default function CustomerPage() {
 
   // ── pending order for AI assistant injection ──
   const [pendingOrder, setPendingOrder] = useState<string | null>(null);
+
+  // ── confirmation pending state (soft-lock chat during confirmation) ──
+  const [isConfirmationPending, setIsConfirmationPending] = useState(false);
 
   // ── order data ──
   const [hasRegistered, setHasRegistered] = useState(false);
