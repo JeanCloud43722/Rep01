@@ -1141,7 +1141,10 @@ export async function registerRoutes(
       const limit = Math.min(parseInt(limitRaw ?? "100", 10) || 100, 200);
 
       const db = getDb();
-      const conditions: ReturnType<typeof eq>[] = [];
+      // Always exclude inactive (out-of-stock) products from the public listing
+      const conditions: ReturnType<typeof eq>[] = [
+        eq(products.isActive, true) as ReturnType<typeof eq>,
+      ];
 
       // OPT-1: accept any category string (dynamic, no hardcoded enum check)
       if (category) {

@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["server/**/*.test.ts"],
+    include: ["server/**/*.test.ts", "client/src/lib/__tests__/**/*.test.ts"],
     setupFiles: ["./server/test-setup.ts"],
     fileParallelism: false,
     testTimeout: 15000,
