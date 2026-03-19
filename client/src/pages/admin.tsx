@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { audioManager } from "@/lib/audio-manager";
 import { useAdminWebSocket } from "@/hooks/use-admin-websocket";
 import { formatOrderId } from "@/lib/format-utils";
+import { formatKitchenTicket } from "@/lib/ticket-formatter";
 import type { Order } from "@shared/schema";
 
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,8 @@ import {
   Wrench,
   Edit,
   MessageSquare,
-  ShoppingBag
+  ShoppingBag,
+  Printer
 } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -137,6 +139,7 @@ function OrderCard({
   const { toast } = useToast();
   const [reactivateOpen, setReactivateOpen] = useState(false);
   const [resetMessages, setResetMessages] = useState(false);
+  const [showTicketPreview, setShowTicketPreview] = useState<string | null>(null);
 
   const { data: orderItemsData } = useQuery<{ order_items: OrderItemRow[] }>({
     queryKey: ["/api/orders", order.id, "order-items"],
@@ -253,34 +256,91 @@ function OrderCard({
         )}
 
         {confirmedItems.length > 0 && (
-          <div className="text-sm bg-muted/50 rounded-md px-3 py-2 space-y-2" data-testid={`order-items-section-${order.id}`}>
-            <p className="font-medium text-xs text-muted-foreground flex items-center gap-1">
-              <ShoppingBag className="h-3 w-3" />
-              Ordered Items ({confirmedItems.length})
-            </p>
-            <div className="space-y-1">
-              {confirmedItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-2 text-xs" data-testid={`admin-order-item-${item.id}`}>
-                  <span className="flex-1 truncate">
-                    <span className="font-medium">{item.productName}</span>
-                    {item.variantName && (
-                      <span className="text-muted-foreground ml-1">({item.variantName})</span>
-                    )}
-                    {item.modifications && (
-                      <span className="text-muted-foreground ml-1 italic">— {item.modifications}</span>
-                    )}
-                  </span>
-                  <span className="text-muted-foreground shrink-0 tabular-nums">
-                    {item.quantity}&times; &euro;{Number(item.priceAtTime).toFixed(2)}
-                  </span>
-                </div>
-              ))}
+          <div className="space-y-2" data-testid={`order-items-section-${order.id}`}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                <ShoppingBag className="h-3 w-3" />
+                Ordered Items ({confirmedItems.length})
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const ticket = formatKitchenTicket(
+                      { id: order.id, createdAt: order.createdAt },
+                      confirmedItems.map((item) => ({
+                        name: item.productName,
+                        variantName: item.variantName,
+                        quantity: item.quantity,
+                        price: Number(item.priceAtTime),
+                        modifications: item.modifications,
+                      }))
+                    );
+                    await navigator.clipboard.writeText(ticket);
+                    toast({ title: "Ticket copied to clipboard!", duration: 2000 });
+                  } catch (err) {
+                    console.error("Clipboard write failed:", err);
+                    const ticket = formatKitchenTicket(
+                      { id: order.id, createdAt: order.createdAt },
+                      confirmedItems.map((item) => ({
+                        name: item.productName,
+                        variantName: item.variantName,
+                        quantity: item.quantity,
+                        price: Number(item.priceAtTime),
+                        modifications: item.modifications,
+                      }))
+                    );
+                    setShowTicketPreview(ticket);
+                    toast({ 
+                      title: "Copy manually from preview below", 
+                      variant: "destructive",
+                      duration: 4000 
+                    });
+                  }
+                }}
+                className="text-xs h-7 gap-1"
+                data-testid={`button-copy-ticket-${order.id}`}
+              >
+                <Printer className="h-3 w-3" />
+                Copy Ticket
+              </Button>
             </div>
-            <div className="border-t pt-1.5 flex justify-end">
-              <span className="text-xs font-semibold tabular-nums">
-                Total: &euro;{confirmedItems.reduce((s, i) => s + i.quantity * Number(i.priceAtTime), 0).toFixed(2)}
-              </span>
+            
+            <div className="text-sm bg-muted/50 rounded-md px-3 py-2 space-y-2">
+              <div className="space-y-1">
+                {confirmedItems.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 text-xs" data-testid={`admin-order-item-${item.id}`}>
+                    <span className="flex-1 truncate">
+                      <span className="font-medium">{item.productName}</span>
+                      {item.variantName && (
+                        <span className="text-muted-foreground ml-1">({item.variantName})</span>
+                      )}
+                      {item.modifications && (
+                        <span className="text-muted-foreground ml-1 italic">— {item.modifications}</span>
+                      )}
+                    </span>
+                    <span className="text-muted-foreground shrink-0 tabular-nums">
+                      {item.quantity}&times; &euro;{Number(item.priceAtTime).toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t pt-1.5 flex justify-end">
+                <span className="text-xs font-semibold tabular-nums">
+                  Total: &euro;{confirmedItems.reduce((s, i) => s + i.quantity * Number(i.priceAtTime), 0).toFixed(2)}
+                </span>
+              </div>
             </div>
+
+            {showTicketPreview && (
+              <div className="mt-3 p-3 bg-slate-900 text-green-400 font-mono text-[11px] rounded-lg overflow-auto max-h-48 border border-green-900/50">
+                <pre className="whitespace-pre break-words">{showTicketPreview}</pre>
+                <p className="text-gray-500 mt-2 text-center text-[10px]">
+                  Select all (Ctrl+A) and copy (Ctrl+C) manually if clipboard failed
+                </p>
+              </div>
+            )}
           </div>
         )}
 

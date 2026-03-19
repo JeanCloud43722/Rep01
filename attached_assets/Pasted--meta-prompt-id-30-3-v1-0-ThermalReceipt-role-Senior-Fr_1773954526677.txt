@@ -1,0 +1,238 @@
+{
+  "meta": {
+    "prompt_id": "30.3-v1.0-ThermalReceipt",
+    "role": "Senior Frontend Engineer",
+    "purpose": "Generate monospace, 32-character-wide ASCII tickets for thermal kitchen printers",
+    "prerequisites": ["Prompt 29: Admin dashboard displays order_items"],
+    "scope": "STRICTLY: Create ticket-formatter.ts utility and integrate into AdminOrderModal"
+  },
+  
+  "critical_directive": "⚠️ SENIOR ENGINEER MODE: This is a FRONTEND-ONLY utility. Do NOT modify backend APIs or database schemas. Focus on pixel-perfect ASCII formatting for 32-column thermal printers.",
+  
+  "project_context": {
+    "name": "Bistro Buzzer",
+    "printer_target": "Standard 32-column thermal receipt printers (Epson TM-T88, Star TSP100, etc.)",
+    "format_constraints": "Strict 32-character width, ASCII-only (no emojis), monospace font assumed"
+  },
+  
+  "objective": "Create a reusable utility that formats order data into a classic kitchen ticket string, copyable to clipboard for printing or API transmission.",
+  
+  "deliverables": [
+    {
+      "file": "client/src/lib/ticket-formatter.ts",
+      "task": "Implement formatKitchenTicket function with strict 32-char width formatting",
+      "code_requirements": [
+        "/**",
+        " * Formats order data into a 32-character-wide ASCII ticket for thermal printers",
+        " * @param order - Order metadata (id, createdAt, status)",
+        " * @param items - Array of order items with product name, variant, quantity, price, modifications",
+        " * @returns string - Formatted ticket, exactly 32 chars per line, ASCII only",
+        " */",
+        "export function formatKitchenTicket(order: { id: string; createdAt: string }, items: Array<{",
+        "  name: string;",
+        "  variantName?: string | null;",
+        "  quantity: number;",
+        "  price: number;",
+        "  modifications?: string | null;",
+        "}>): string {",
+        "  // Helper: pad or truncate string to exact width",
+        "  const fit = (text: string, width: number, align: 'left' | 'right' = 'left'): string => {",
+        "    const clean = text.replace(/[^\\x20-\\x7E]/g, ''); // Remove non-ASCII",
+        "    if (clean.length >= width) return clean.slice(0, width);",
+        "    return align === 'left' ? clean.padEnd(width) : clean.padStart(width);",
+        "  };",
+        "  ",
+        "  const lines: string[] = [];",
+        "  const separator = '--------------------------------'; // exactly 32 dashes",
+        "  ",
+        "  // Header",
+        "  lines.push(fit('BISTRO BUZZER', 32, 'center'));",
+        "  lines.push(fit('Kitchen Ticket', 32, 'center'));",
+        "  lines.push(separator);",
+        "  lines.push(`Order: ${order.id}`.padEnd(32).slice(0, 32));",
+        "  lines.push(`Time: ${new Date(order.createdAt).toLocaleTimeString()}`.padEnd(32).slice(0, 32));",
+        "  lines.push(separator);",
+        "  lines.push(''); // Blank line before items",
+        "  ",
+        "  // Items list",
+        "  let total = 0;",
+        "  for (const item of items) {",
+        "    const lineTotal = item.price * item.quantity;",
+        "    total += lineTotal;",
+        "    ",
+        "    // Main item line: \"2x Pizza Margherita (Large)      24.00\"",
+        "    let itemLine = `${item.quantity}x ${item.name}`;",
+        "    if (item.variantName) itemLine += ` (${item.variantName})`;",
+        "    ",
+        "    // Truncate item name if too long (reserve 7 chars for price)",
+        "    const maxNameLen = 32 - 7; // 7 chars for \"  999.99\"",
+        "    if (itemLine.length > maxNameLen) {",
+        "      itemLine = itemLine.slice(0, maxNameLen - 3) + '...';",
+        "    }",
+        "    ",
+        "    lines.push(`${itemLine.padEnd(25)}${lineTotal.toFixed(2).padStart(7)}`);",
+        "    ",
+        "    // Modifications: indented, wrapped if needed",
+        "    if (item.modifications) {",
+        "      const modPrefix = '  > ';",
+        "      const modText = item.modifications.replace(/[^\\x20-\\x7E]/g, '');",
+        "      // Simple word wrap at 32 chars",
+        "      const words = modText.split(' ');",
+        "      let currentLine = modPrefix;",
+        "      for (const word of words) {",
+        "        if ((currentLine + word).length <= 32) {",
+        "          currentLine += word + ' ';",
+        "        } else {",
+        "          lines.push(currentLine.trim().padEnd(32).slice(0, 32));",
+        "          currentLine = '    ' + word + ' '; // Indent continuation",
+        "        }",
+        "      }",
+        "      if (currentLine.trim()) {",
+        "        lines.push(currentLine.trim().padEnd(32).slice(0, 32));",
+        "      }",
+        "    }",
+        "    lines.push(''); // Blank line between items",
+        "  }",
+        "  ",
+        "  lines.push(separator);",
+        "  lines.push(`TOTAL: ${total.toFixed(2).padStart(25)} `.padEnd(32).slice(0, 32));",
+        "  lines.push('');",
+        "  lines.push(fit('Thank you!', 32, 'center'));",
+        "  ",
+        "  // Ensure every line is exactly 32 chars (pad or truncate)",
+        "  return lines.map(line => line.padEnd(32).slice(0, 32)).join('\\n');",
+        "}"
+      ]
+    },
+    {
+      "file": "client/src/components/admin/AdminOrderModal.tsx",
+      "task": "Add 'Copy Kitchen Ticket' button with clipboard integration",
+      "code_requirements": [
+        "// Import the formatter:",
+        "import { formatKitchenTicket } from '@/lib/ticket-formatter';",
+        "",
+        "// Inside the order items display section, add button:",
+        "<div className=\"flex justify-between items-center mt-4\">",
+        "  <h4 className=\"font-semibold\">Order Items</h4>",
+        "  <button",
+        "    onClick={async () => {",
+        "      try {",
+        "        const ticket = formatKitchenTicket(order, orderItems);",
+        "        await navigator.clipboard.writeText(ticket);",
+        "        toast.success('📋 Ticket copied to clipboard!', { duration: 2000 });",
+        "      } catch (err) {",
+        "        console.error('Clipboard write failed:', err);",
+        "        toast.error('Could not copy ticket. Select and copy manually.', { duration: 4000 });",
+        "        ",
+        "        // Fallback: show ticket in modal for manual copy",
+        "        setShowTicketPreview(formatKitchenTicket(order, orderItems));",
+        "      }",
+        "    }}",
+        "    className=\"px-3 py-1.5 text-sm glass-hover rounded-lg flex items-center gap-1\"",
+        "    aria-label=\"Copy kitchen ticket for thermal printer\"",
+        "  >",
+        "    📋 Copy Ticket",
+        "  </button>",
+        "</div>",
+        "",
+        "// Optional: show preview modal if clipboard fails",
+        "{showTicketPreview && (",
+        "  <div className=\"mt-4 p-3 bg-gray-900 text-green-400 font-mono text-xs rounded-lg overflow-x-auto\">",
+        "    <pre className=\"whitespace-pre\">{showTicketPreview}</pre>",
+        "    <p className=\"text-gray-400 mt-2 text-center\">",
+        "      Select all (Ctrl+A) and copy (Ctrl+C) manually",
+        "    </p>",
+        "  </div>",
+        ")}"
+      ]
+    },
+    {
+      "file": "client/src/lib/ticket-formatter.test.ts (optional but recommended)",
+      "task": "Add unit tests for edge cases",
+      "code_requirements": [
+        "import { formatKitchenTicket } from './ticket-formatter';",
+        "",
+        "test('formats single item correctly', () => {",
+        "  const result = formatKitchenTicket(",
+        "    { id: 'ABC-123', createdAt: '2024-01-15T18:30:00Z' },",
+        "    [{ name: 'Pizza Margherita', quantity: 2, price: 12.50, variantName: 'Large' }]",
+        "  );",
+        "  const lines = result.split('\\n');",
+        "  expect(lines.every(line => line.length === 32)).toBe(true);",
+        "  expect(result).toContain('2x Pizza Margherita (Large)');",
+        "  expect(result).toContain('  25.00'); // price aligned right",
+        "});",
+        "",
+        "test('handles long product names with truncation', () => {",
+        "  const result = formatKitchenTicket(",
+        "    { id: 'XYZ', createdAt: '2024-01-15T18:30:00Z' },",
+        "    [{ name: 'Very Long Product Name That Exceeds Thirty Two Characters Limit', quantity: 1, price: 9.99 }]",
+        "  );",
+        "  expect(result).toContain('...'); // truncation indicator",
+        "  expect(result.split('\\n').every((l: string) => l.length === 32)).toBe(true);",
+        "});",
+        "",
+        "test('removes non-ASCII characters for printer compatibility', () => {",
+        "  const result = formatKitchenTicket(",
+        "    { id: 'TEST', createdAt: '2024-01-15T18:30:00Z' },",
+        "    [{ name: 'Café 🍕 Pizza', quantity: 1, price: 10.00 }]",
+        "  );",
+        "  expect(result).not.toContain('🍕'); // emoji removed",
+        "  expect(result).toContain('Caf  Pizza'); // accented char removed or replaced",
+        "});"
+      ]
+    }
+  ],
+  
+  "testing_checkpoints": [
+    {
+      "step": 1,
+      "command": "Open confirmed order in Admin Dashboard, click '📋 Copy Ticket'",
+      "expected": "Toast shows '📋 Ticket copied to clipboard!'"
+    },
+    {
+      "step": 2,
+      "command": "Paste clipboard contents into plain text editor (e.g., Notepad)",
+      "expected": "Text is perfectly aligned to 32 characters per line, resembles classic thermal receipt"
+    },
+    {
+      "step": 3,
+      "command": "Test with long product name: 'Very Long Pasta Dish with Extra Ingredients'",
+      "expected": "Name is truncated with '...' indicator, line still exactly 32 chars, price aligned right"
+    },
+    {
+      "step": 4,
+      "command": "Test with modifications: 'no onions, extra cheese, well done'",
+      "expected": "Modifications appear on indented lines below item, word-wrapped at 32 chars"
+    },
+    {
+      "step": 5,
+      "command": "Test with emoji in product name: 'Pizza 🍕 Margherita'",
+      "expected": "Emoji removed from output, only ASCII characters remain (printer-safe)"
+    },
+    {
+      "step": 6,
+      "command": "Simulate clipboard API failure (block in DevTools), click 'Copy Ticket'",
+      "expected": "Error toast appears + ticket preview shown in modal for manual copy"
+    },
+    {
+      "step": 7,
+      "command": "Run npm test (including new ticket-formatter.test.ts)",
+      "expected": "All tests pass, including edge-case tests for truncation and ASCII filtering"
+    }
+  ],
+  
+  "replit_specific_notes": [
+    "navigator.clipboard requires HTTPS – Replit previews use HTTPS, so this works in production",
+    "Fallback modal ensures functionality even if clipboard API is blocked (older browsers, strict CSP)",
+    "Font-mono + green-on-black styling mimics actual thermal printer output for preview",
+    "32-character width is industry standard – do not change unless printer specs differ",
+    "ASCII-only output ensures compatibility with all thermal printers, even basic models"
+  ],
+  
+  "success_criteria": "Prompt 30.3 is COMPLETE when:\n1. formatKitchenTicket function outputs exactly 32 chars per line, ASCII-only\n2. AdminOrderModal has '📋 Copy Ticket' button with clipboard integration\n3. Fallback modal appears if clipboard API fails\n4. Long names are truncated with '...' indicator, prices right-aligned\n5. Modifications are indented and word-wrapped at 32 chars\n6. Non-ASCII characters (emojis, accents) are removed for printer safety\n7. All 7 testing checkpoints pass\n8. Zero TypeScript errors (npx tsc --noEmit)\n9. All pre-existing tests still pass",
+  
+  "failure_handling": "If clipboard API fails consistently:\n1. Ensure Replit preview uses HTTPS (required for clipboard API)\n2. Add user instruction: 'If copy fails, select text manually'\n3. Do NOT remove the feature – thermal ticket formatting is critical for kitchen ops\n4. Consider adding direct printer API integration later (separate prompt)",
+  
+  "final_self_verification": "□ Does formatKitchenTicket enforce exactly 32 chars per line? □ Are non-ASCII characters removed? □ Are long names truncated with '...'? □ Are prices right-aligned in 7-char field? □ Are modifications indented and word-wrapped? □ Does AdminOrderModal have working 'Copy Ticket' button? □ Does fallback modal appear on clipboard failure? □ Do all 7 testing checkpoints pass? □ Do all pre-existing tests still pass?"
+}
