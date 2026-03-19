@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,7 +41,8 @@ import {
   Edit,
   MessageSquare,
   ShoppingBag,
-  Printer
+  Printer,
+  Settings
 } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -122,7 +124,9 @@ function OrderCard({
   onEditNotes,
   onSendMessage,
   onComplete,
-  onReactivate
+  onReactivate,
+  hasUnreadMsg = false,
+  hasUnackSvcReq = false
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
@@ -134,6 +138,8 @@ function OrderCard({
   onSendMessage: (orderId: string) => void;
   onComplete: (orderId: string) => void;
   onReactivate: (orderId: string, resetMessages: boolean) => void;
+  hasUnreadMsg?: boolean;
+  hasUnackSvcReq?: boolean;
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   const { toast } = useToast();
@@ -166,8 +172,23 @@ function OrderCard({
   });
 
   return (
-    <Card className="hover-elevate transition-all duration-200">
+    <Card className={`hover-elevate transition-all duration-200 relative border-2 ${
+      hasUnackSvcReq 
+        ? "border-red-400 bg-red-50/5 dark:bg-red-950/10" 
+        : hasUnreadMsg 
+          ? "border-blue-400 bg-blue-50/5 dark:bg-blue-950/10" 
+          : ""
+    }`}>
       <CardHeader className="pb-3">
+        {/* Unacknowledged service request indicator */}
+        {hasUnackSvcReq && (
+          <div className="absolute top-3 left-3">
+            <span className="relative flex h-3 w-3 flex-shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+            </span>
+          </div>
+        )}
         <div className="flex items-start justify-between gap-2">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -184,14 +205,21 @@ function OrderCard({
               {formatDate(order.createdAt)} at {formatTime(order.createdAt)}
             </CardDescription>
           </div>
-          <Badge 
-            variant={getStatusBadgeVariant(order.status)} 
-            className="flex items-center gap-1 capitalize"
-            data-testid={`badge-status-${order.id}`}
-          >
-            {getStatusIcon(order.status)}
-            {order.status}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {hasUnreadMsg && (
+              <Badge className="bg-blue-500 hover:bg-blue-600 text-white text-xs" data-testid={`badge-unread-${order.id}`}>
+                Unread
+              </Badge>
+            )}
+            <Badge 
+              variant={getStatusBadgeVariant(order.status)} 
+              className="flex items-center gap-1 capitalize"
+              data-testid={`badge-status-${order.id}`}
+            >
+              {getStatusIcon(order.status)}
+              {order.status}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1404,6 +1432,56 @@ export default function AdminPage() {
   const activeOrders = activeQuery.data?.orders ?? [];
   const completedOrders = completedQuery.data?.orders ?? [];
 
+  // ── URGENCY SCORING & SORTING ──
+  // Helper function to calculate urgency score (lower = more urgent)
+  const calculateUrgencyScore = useCallback((order: Order): number => {
+    // 1. Unacknowledged service request = highest priority (score 0)
+    if (order.serviceRequests && order.serviceRequests.length > 0) {
+      const unacknowledged = order.serviceRequests.some(req => req.acknowledgedAt === null);
+      if (unacknowledged) return 0;
+    }
+    
+    // 2. Unread customer message (last message from customer) = score 1
+    if (order.messages && order.messages.length > 0) {
+      const lastMsg = order.messages[order.messages.length - 1];
+      if (lastMsg.sender === "customer") return 1;
+    }
+    
+    // 3. Status requiring action (waiting, scheduled) = score 2
+    if (["waiting", "scheduled"].includes(order.status)) return 2;
+    
+    // 4. Status done (notified, completed) = score 3
+    if (["notified", "completed"].includes(order.status)) return 3;
+    
+    // 5. Default fallback
+    return 4;
+  }, []);
+
+  // Memoized sorted active orders
+  const sortedActiveOrders = useMemo(() => {
+    return [...activeOrders].sort((a, b) => {
+      const scoreA = calculateUrgencyScore(a);
+      const scoreB = calculateUrgencyScore(b);
+      
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      // Tiebreaker: oldest first (by creation time)
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+  }, [activeOrders, calculateUrgencyScore]);
+
+  // Helper to check if order has unread message
+  const hasUnreadMessage = useCallback((order: Order): boolean => {
+    if (!order.messages || order.messages.length === 0) return false;
+    const lastMsg = order.messages[order.messages.length - 1];
+    return lastMsg.sender === "customer";
+  }, []);
+
+  // Helper to check if order has unacknowledged service request
+  const hasUnackServiceRequest = useCallback((order: Order): boolean => {
+    if (!order.serviceRequests || order.serviceRequests.length === 0) return false;
+    return order.serviceRequests.some(req => req.acknowledgedAt === null);
+  }, []);
+
   if (meLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1442,60 +1520,84 @@ export default function AdminPage() {
               <Volume2 className="h-3 w-3 mr-1" />
               {audioEnabled ? "Sound On" : "Tap to enable sound"}
             </Badge>
-            <Button
-              variant={isAdminMuted ? "outline" : "ghost"}
-              size="icon"
-              onClick={toggleAdminMute}
-              aria-label={isAdminMuted ? "Unmute alerts" : "Mute alerts"}
-              title={isAdminMuted ? "Unmute alerts" : "Mute alerts"}
-              data-testid="button-admin-mute"
-            >
-              {isAdminMuted ? <VolumeX className="h-4 w-4 text-muted-foreground" /> : <Volume2 className="h-4 w-4 text-green-600" />}
-            </Button>
-            <Button 
-              variant="outline" 
-              size="icon" 
-              onClick={() => refetch()}
-              data-testid="button-refresh"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
             <Button 
               onClick={handleCreateOrder}
               disabled={createOrderMutation.isPending}
               data-testid="button-create-order"
+              className="font-semibold"
             >
               <Plus className="h-4 w-4 mr-2" />
               New Order
             </Button>
-            {completedOrders.length > 0 && (
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  if (!confirm("Remove all completed orders older than 24 hours?")) return;
-                  try {
-                    await apiRequest("POST", "/api/orders/cleanup", { maxAgeHours: 24 });
-                    toast({ title: "Success", description: "Completed orders removed" });
-                    queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-                  } catch (error) {
-                    toast({ title: "Error", description: "Cleanup failed", variant: "destructive" });
-                  }
-                }}
-                data-testid="button-cleanup"
-              >
-                Clear Completed
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => logoutMutation.mutate()}
-              disabled={logoutMutation.isPending}
-              title={`Logged in as ${me.username} — click to sign out`}
-              data-testid="button-logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  title="More options"
+                  data-testid="button-settings-menu"
+                >
+                  <Settings className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem 
+                  onClick={() => refetch()}
+                  data-testid="menu-item-refresh"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Now
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={toggleAdminMute}
+                  data-testid="menu-item-toggle-mute"
+                >
+                  {isAdminMuted ? (
+                    <>
+                      <Volume2 className="h-4 w-4 mr-2" />
+                      Unmute Sounds
+                    </>
+                  ) : (
+                    <>
+                      <VolumeX className="h-4 w-4 mr-2" />
+                      Mute Sounds
+                    </>
+                  )}
+                </DropdownMenuItem>
+                {completedOrders.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={async () => {
+                        if (!confirm("Remove all completed orders older than 24 hours?")) return;
+                        try {
+                          await apiRequest("POST", "/api/orders/cleanup", { maxAgeHours: 24 });
+                          toast({ title: "Success", description: "Completed orders removed" });
+                          queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+                        } catch (error) {
+                          toast({ title: "Error", description: "Cleanup failed", variant: "destructive" });
+                        }
+                      }}
+                      data-testid="menu-item-cleanup"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Clear Completed
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => logoutMutation.mutate()}
+                  disabled={logoutMutation.isPending}
+                  className="text-red-600 dark:text-red-400"
+                  data-testid="menu-item-logout"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
@@ -1528,7 +1630,7 @@ export default function AdminPage() {
               <EmptyState onCreateOrder={handleCreateOrder} />
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {activeOrders.map((order) => (
+                {sortedActiveOrders.map((order) => (
                   <OrderCard
                     key={order.id}
                     order={order}
@@ -1541,6 +1643,8 @@ export default function AdminPage() {
                     onSendMessage={setMessageOrderId}
                     onComplete={(id) => completeOrderMutation.mutate(id)}
                     onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
+                    hasUnreadMsg={hasUnreadMessage(order)}
+                    hasUnackSvcReq={hasUnackServiceRequest(order)}
                   />
                 ))}
               </div>
@@ -1567,6 +1671,8 @@ export default function AdminPage() {
                     onSendMessage={setMessageOrderId}
                     onComplete={(id) => completeOrderMutation.mutate(id)}
                     onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
+                    hasUnreadMsg={hasUnreadMessage(order)}
+                    hasUnackSvcReq={hasUnackServiceRequest(order)}
                   />
                 ))}
               </div>

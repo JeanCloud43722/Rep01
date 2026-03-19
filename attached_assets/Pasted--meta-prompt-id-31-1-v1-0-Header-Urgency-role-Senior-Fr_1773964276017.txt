@@ -1,0 +1,169 @@
+{
+  "meta": {
+    "prompt_id": "31.1-v1.0-Header-Urgency",
+    "role": "Senior Frontend Engineer",
+    "purpose": "Declutter admin header and implement urgency-based order sorting – the foundation for all other dashboard improvements.",
+    "prerequisites": [
+      "admin.tsx exists and renders order list",
+      "WebSocket events for messages/service_requests are received (but not yet used for sorting)",
+      "Tailwind CSS and lucide-react are installed"
+    ],
+    "scope": "STRICTLY: client/src/pages/admin.tsx header section + order sorting logic. NO new components, NO backend changes."
+  },
+  
+  "critical_directive": "⚠️ SENIOR ENGINEER MODE: This is a FOUNDATION prompt. Do NOT implement ActivityFeed, MessageModal, or Kanban view yet. Focus ONLY on header cleanup and sorting. If you start adding new components, STOP immediately.",
+  
+  "deliverables": [
+    {
+      "file": "client/src/pages/admin.tsx",
+      "task": "Header cleanup + urgency sorting with useMemo",
+      "code_requirements": [
+        "// 1. HEADER CLEANUP – Move actions into Settings DropdownMenu",
+        "import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';",
+        "import { Settings, Bell, LogOut, Trash2, VolumeX } from 'lucide-react';",
+        "",
+        "// Replace scattered header buttons with:",
+        "<div className=\"flex items-center gap-2\">",
+        "  {/* Primary action: New Order – always visible */}",
+        "  <Button onClick={handleNewOrder} className=\"bg-orange-500 hover:bg-orange-600\">",
+        "    + New Order <kbd className=\"ml-2 text-xs bg-white/20 px-1 rounded\">N</kbd>",
+        "  </Button>",
+        "  ",
+        "  {/* Notifications bell – shows badge if unread events */}",
+        "  <Button variant=\"ghost\" size=\"icon\" onClick={openActivityFeed}>",
+        "    <Bell className=\"w-5 h-5\" />",
+        "    {unreadEventCount > 0 && (",
+        "      <span className=\"absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center\">",
+        "        {unreadEventCount}",
+        "      </span>",
+        "    )}",
+        "  </Button>",
+        "  ",
+        "  {/* Settings dropdown – contains secondary actions */}",
+        "  <DropdownMenu>",
+        "    <DropdownMenuTrigger asChild>",
+        "      <Button variant=\"ghost\" size=\"icon\"><Settings className=\"w-5 h-5\" /></Button>",
+        "    </DropdownMenuTrigger>",
+        "    <DropdownMenuContent align=\"end\">",
+        "      <DropdownMenuItem onClick={toggleMute}>",
+        "        {isMuted ? <VolumeX className=\"w-4 h-4 mr-2\" /> : <Volume2 className=\"w-4 h-4 mr-2\" />}",
+        "        {isMuted ? 'Unmute Sounds' : 'Mute Sounds'}",
+        "      </DropdownMenuItem>",
+        "      <DropdownMenuItem onClick={clearCompleted}>",
+        "        <Trash2 className=\"w-4 h-4 mr-2\" /> Clear Completed",
+        "      </DropdownMenuItem>",
+        "      <DropdownMenuItem onClick={handleLogout} className=\"text-red-600\">",
+        "        <LogOut className=\"w-4 h-4 mr-2\" /> Logout",
+        "      </DropdownMenuItem>",
+        "    </DropdownMenuContent>",
+        "  </DropdownMenu>",
+        "</div>",
+        "",
+        "// 2. URGENCY SORTING – useMemo with strict hierarchy",
+        "const sortedOrders = useMemo(() => {",
+        "  return [...orders].sort((a, b) => {",
+        "    // Helper: calculate urgency score (lower = more urgent)",
+        "    const urgencyScore = (order: Order) => {",
+        "      // 1. Unacknowledged service request = highest priority",
+        "      if (order.hasServiceRequest && !order.serviceRequestAcknowledged) return 0;",
+        "      ",
+        "      // 2. Unread customer message (last message from customer)",
+        "      const lastMsg = order.messages?.[order.messages.length - 1];",
+        "      if (lastMsg?.sender === 'customer' && !lastMsg.readByStaff) return 1;",
+        "      ",
+        "      // 3. Status requiring action",
+        "      if (['waiting', 'scheduled'].includes(order.status)) return 2;",
+        "      ",
+        "      // 4. Status done (still show, but lower)",
+        "      if (['notified', 'completed'].includes(order.status)) return 3;",
+        "      ",
+        "      // 5. Fallback: oldest first",
+        "      return 4;",
+        "    };",
+        "    ",
+        "    const scoreA = urgencyScore(a);",
+        "    const scoreB = urgencyScore(b);",
+        "    ",
+        "    if (scoreA !== scoreB) return scoreA - scoreB;",
+        "    // Tiebreaker: oldest first",
+        "    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();",
+        "  });",
+        "}, [orders]);",
+        "",
+        "// 3. VISUAL CUES – conditional classes on OrderCard wrapper",
+        "// In the OrderCard render loop:",
+        "<div",
+        "  className={`",
+        "    relative rounded-xl border-2 transition-all",
+        "    ${order.hasServiceRequest && !order.serviceRequestAcknowledged",
+        "      ? 'border-red-400 bg-red-50/10 animate-pulse-slow'",
+        "      : order.hasUnreadMessage",
+        "        ? 'border-blue-400 bg-blue-50/5'",
+        "        : 'border-gray-200 hover:border-gray-300'",
+        "    }",
+        "  `}",
+        ">",
+        "  {/* Unread badge – only if unread message */}",
+        "  {order.hasUnreadMessage && (",
+        "    <span className=\"absolute top-2 right-2 px-2 py-0.5 bg-blue-500 text-white text-xs rounded-full\">",
+        "      Unread",
+        "    </span>",
+        "  )}",
+        "  ",
+        "  {/* Service request indicator – red dot */}",
+        "  {order.hasServiceRequest && !order.serviceRequestAcknowledged && (",
+        "    <span className=\"absolute top-2 left-2 w-3 h-3 bg-red-500 rounded-full animate-ping\" />",
+        "  )}",
+        "  ",
+        "  {/* Rest of OrderCard content */}",
+        "  <OrderCardContent order={order} />",
+        "</div>",
+        "",
+        "// Add CSS animation for subtle pulse (in index.css or tailwind.config.js):",
+        "// @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.85; } }",
+        "// .animate-pulse-slow { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }"
+      ]
+    }
+  ],
+  
+  "testing_checkpoints": [
+    {
+      "step": 1,
+      "command": "Open admin dashboard with 5+ test orders (mixed statuses)",
+      "expected": "Header shows: [New Order button] [Bell icon] [⚙️ Settings dropdown]. Mute/Logout/Clear are INSIDE dropdown, not visible on main bar."
+    },
+    {
+      "step": 2,
+      "command": "Create order with service request (unacknowledged)",
+      "expected": "OrderCard has red pulsing dot + red-tinted background + appears at TOP of list regardless of creation time."
+    },
+    {
+      "step": 3,
+      "command": "Send customer message to existing order (staff hasn't read)",
+      "expected": "OrderCard gets blue border + 'Unread' badge + moves above 'waiting' status orders."
+    },
+    {
+      "step": 4,
+      "command": "Mark message as read (open modal, send reply)",
+      "expected": "Blue border and 'Unread' badge disappear; order re-sorts based on status."
+    },
+    {
+      "step": 5,
+      "command": "Run npm test",
+      "expected": "All pre-existing tests pass; no regression from header/sorting changes."
+    }
+  ],
+  
+  "replit_specific_notes": [
+    "If shadcn/ui DropdownMenu is not installed, use a simple Tailwind dropdown with state management instead – do NOT block on missing dependencies.",
+    "Tailwind animation classes: use 'animate-pulse' for red dot, custom 'animate-pulse-slow' for card background if needed.",
+    "Test sorting logic in isolation: add console.log(sortedOrders.map(o => ({id: o.id, score: urgencyScore(o)}))) temporarily for debugging.",
+    "Performance: useMemo ensures sorting only recalculates when orders array changes, not on every render."
+  ],
+  
+  "success_criteria": "Prompt 31.1 is COMPLETE when:\n1. Header actions are consolidated into Settings dropdown (except New Order + Bell)\n2. Urgency sorting hierarchy is implemented exactly: Service Request > Unread Message > Action-Needed Status > Done > Time\n3. Visual cues (red pulse/blue border) appear conditionally based on order state\n4. Sorting is performant (useMemo) and stable (deterministic tiebreaker)\n5. All 5 testing checkpoints pass\n6. Zero TypeScript errors (npx tsc --noEmit)\n7. All pre-existing tests still pass",
+  
+  "failure_handling": "If sorting doesn't work as expected:\n1. Temporarily log urgency scores to console to debug calculation\n2. Verify order object has expected fields: hasServiceRequest, messages[], status\n3. If DropdownMenu fails: fallback to simple button group with conditional rendering\n4. Do NOT skip visual cues – they are critical for staff UX\n5. Wait for explicit confirmation before proceeding to Prompt 31.2",
+  
+  "final_self_verification": "Before marking complete:\n□ Are Mute/Clear/Logout inside a dropdown, not visible on main header?\n□ Does service request order appear at TOP regardless of age?\n□ Does unread message order appear above 'waiting' status orders?\n□ Do visual cues (red pulse/blue border) appear conditionally?\n□ Is sorting wrapped in useMemo with correct dependencies?\n□ Does npx tsc --noEmit return 0 errors?\n□ Do all pre-existing tests still pass?\n\nIf ANY answer is NO: fix before proceeding."
+}
