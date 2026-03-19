@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   serial,
+  integer,
   numeric,
   index,
   uniqueIndex,
@@ -228,3 +229,40 @@ export const products = pgTable(
 
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = typeof products.$inferInsert;
+
+// ─── Order items (confirmed via AI ordering chat) ─────────────────────────────
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: serial("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    variantName: text("variant_name"),
+    quantity: integer("quantity").notNull().default(1),
+    modifications: text("modifications"),
+    priceAtTime: numeric("price_at_time", { precision: 10, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("order_items_order_idx").on(t.orderId, t.productId),
+    check("order_items_qty_check", sql`${t.quantity} > 0`),
+  ]
+);
+
+export type OrderItem = typeof orderItems.$inferSelect;
+export type InsertOrderItem = typeof orderItems.$inferInsert;
+
+// ─── Idempotency keys (prevent duplicate order confirmations) ─────────────────
+export const idempotencyKeys = pgTable(
+  "idempotency_keys",
+  {
+    key: text("key").primaryKey(),
+    orderId: text("order_id").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idempotency_order_idx").on(t.orderId)]
+);

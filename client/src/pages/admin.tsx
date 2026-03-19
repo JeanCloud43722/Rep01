@@ -37,12 +37,25 @@ import {
   Gift,
   Wrench,
   Edit,
-  MessageSquare
+  MessageSquare,
+  ShoppingBag
 } from "lucide-react";
 import QRCode from "qrcode";
 
 type OrderWithMeta = Order & { totalMessages: number };
 type PaginatedOrdersResponse = { orders: OrderWithMeta[]; total: number; limit: number; offset: number };
+
+interface OrderItemRow {
+  id: number;
+  productId: number;
+  variantName: string | null;
+  quantity: number;
+  modifications: string | null;
+  priceAtTime: string;
+  createdAt: string;
+  productName: string;
+  productCategory: string;
+}
 
 const ACTIVE_STATUSES = "waiting,subscribed,scheduled,notified";
 
@@ -124,6 +137,18 @@ function OrderCard({
   const { toast } = useToast();
   const [reactivateOpen, setReactivateOpen] = useState(false);
   const [resetMessages, setResetMessages] = useState(false);
+
+  const { data: orderItemsData } = useQuery<{ order_items: OrderItemRow[] }>({
+    queryKey: ["/api/orders", order.id, "order-items"],
+    queryFn: async () => {
+      const res = await fetch(`/api/orders/${order.id}/order-items`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load order items");
+      return res.json() as Promise<{ order_items: OrderItemRow[] }>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const confirmedItems = orderItemsData?.order_items ?? [];
 
   const acknowledgeMutation = useMutation({
     mutationFn: ({ orderId, requestId }: { orderId: string; requestId: string }) =>
@@ -223,6 +248,38 @@ function OrderCard({
                   <span className="text-muted-foreground shrink-0">{formatTime(msg.sentAt)}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {confirmedItems.length > 0 && (
+          <div className="text-sm bg-muted/50 rounded-md px-3 py-2 space-y-2" data-testid={`order-items-section-${order.id}`}>
+            <p className="font-medium text-xs text-muted-foreground flex items-center gap-1">
+              <ShoppingBag className="h-3 w-3" />
+              Ordered Items ({confirmedItems.length})
+            </p>
+            <div className="space-y-1">
+              {confirmedItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-2 text-xs" data-testid={`admin-order-item-${item.id}`}>
+                  <span className="flex-1 truncate">
+                    <span className="font-medium">{item.productName}</span>
+                    {item.variantName && (
+                      <span className="text-muted-foreground ml-1">({item.variantName})</span>
+                    )}
+                    {item.modifications && (
+                      <span className="text-muted-foreground ml-1 italic">— {item.modifications}</span>
+                    )}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 tabular-nums">
+                    {item.quantity}&times; &euro;{Number(item.priceAtTime).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="border-t pt-1.5 flex justify-end">
+              <span className="text-xs font-semibold tabular-nums">
+                Total: &euro;{confirmedItems.reduce((s, i) => s + i.quantity * Number(i.priceAtTime), 0).toFixed(2)}
+              </span>
             </div>
           </div>
         )}
@@ -1055,6 +1112,13 @@ export default function AdminPage() {
 
   // Admin WebSocket — real-time alerts via reusable hook
   const { connectionStatus } = useAdminWebSocket((eventType, orderId) => {
+    if (eventType === "ORDER_CONFIRMED") {
+      // Invalidate only the specific order's items query — no sound/vibration for order confirmations
+      if (orderId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId, "order-items"] });
+      }
+      return;
+    }
     playStaffSound(eventType as "service_request" | "new_registration" | "order_completed" | "message");
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     showEventToast(eventType, orderId);

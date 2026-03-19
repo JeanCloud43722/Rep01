@@ -20,7 +20,8 @@ import { retrieveRelevantChunks, getChunkCount } from "./lib/knowledge-base/retr
 import { processKnowledgeBase } from "./lib/knowledge-base/processor";
 import { webSearch } from "./lib/web-search";
 import { products } from "../shared/schema";
-import { eventBus, type MenuEvent } from "./lib/event-bus";
+import { eventBus, type MenuEvent, type OrderEvent } from "./lib/event-bus";
+import { setupChatRoutes } from "./routes/chat";
 import bcrypt from "bcryptjs";
 
 const VERSION = (() => {
@@ -518,6 +519,40 @@ export async function registerRoutes(
       customers: customerCount,
       admins: adminCount,
     });
+  });
+
+  // Broadcast ORDER_CONFIRMED events to admin WebSocket clients
+  eventBus.on("order:confirmed", (event: OrderEvent) => {
+    const message = JSON.stringify(event);
+    let adminCount = 0;
+    adminSubscribers.forEach((ws) => {
+      if (ws.readyState === 1) {
+        ws.send(message);
+        adminCount++;
+      }
+    });
+    logger.info("Order confirmed broadcast", {
+      source: "ws",
+      orderId: event.orderId,
+      admins: adminCount,
+    });
+  });
+
+  // Register AI ordering chat routes
+  setupChatRoutes(app);
+
+  // Hourly cleanup: remove idempotency keys older than 1 hour
+  schedule.scheduleJob("0 * * * *", async () => {
+    try {
+      const db = getDb();
+      const { idempotencyKeys } = await import("../shared/schema");
+      const { lt } = await import("drizzle-orm");
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, oneHourAgo));
+      logger.info("Idempotency key cleanup complete", { source: "schedule" });
+    } catch (err) {
+      logger.warn("Idempotency key cleanup failed", { source: "schedule", error: String(err) });
+    }
   });
 
   app.get("/api/health", async (_req, res) => {

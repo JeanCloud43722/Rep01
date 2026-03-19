@@ -13,7 +13,24 @@ export interface ProductImageAddedEvent {
   imageUrl: string;
 }
 
+export interface OrderConfirmedEvent {
+  type: "ORDER_CONFIRMED";
+  orderId: string;
+  items: Array<{
+    id: number;
+    orderId: string;
+    productId: number;
+    variantName: string | null;
+    quantity: number;
+    modifications: string | null;
+    priceAtTime: string;
+    createdAt: Date | null;
+  }>;
+  timestamp: string;
+}
+
 export type MenuEvent = MenuUpdatedEvent | ProductImageAddedEvent;
+export type OrderEvent = OrderConfirmedEvent;
 
 class EventBus extends EventEmitter {}
 
@@ -22,4 +39,8 @@ eventBus.setMaxListeners(20);
 
 export function publishMenuEvent(event: MenuEvent): void {
   eventBus.emit("menu:updates", event);
+}
+
+export function publishOrderEvent(event: OrderEvent): void {
+  eventBus.emit("order:confirmed", event);
 }

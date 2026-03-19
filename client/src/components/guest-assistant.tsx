@@ -4,9 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Sparkles, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
+import { Loader2, Sparkles, ChevronDown, ChevronUp, ExternalLink, ShoppingBag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { OrderConfirmation } from "./OrderConfirmation";
+import type { OrderPreview } from "./OrderConfirmation";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Source {
   type: "knowledge-base" | "web";
@@ -20,6 +24,13 @@ interface Answer {
   question: string;
   answer: string;
   sources: Source[];
+  orderPreview?: OrderPreview | null;
+  isOrderingMode?: boolean;
+}
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
 interface GuestAssistantProps {
@@ -30,6 +41,8 @@ interface GuestAssistantProps {
   onClearPendingOrder?: () => void;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: GuestAssistantProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -38,6 +51,10 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
   const [isLoading, setIsLoading] = useState(false);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const answerEndRef = useRef<HTMLDivElement>(null);
+
+  // Ordering mode: activated when pendingOrder cart injection arrives
+  const [orderingMode, setOrderingMode] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     if (answers.length > 0) {
@@ -50,6 +67,8 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
     if (!pendingOrder) return;
     setOpen(true);
     setQuestion(pendingOrder);
+    setOrderingMode(true);
+    setChatHistory([]);
     onClearPendingOrder?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingOrder]);
@@ -60,15 +79,55 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
 
     setIsLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/ai/guest-assistant", {
-        orderId,
-        question: trimmed,
-      });
-      const data = (await res.json()) as { answer: string; sources: Source[] };
-      setAnswers((prev) => [...prev, { question: trimmed, answer: data.answer, sources: data.sources }]);
+      if (orderingMode) {
+        // ── Ordering chat: DeepSeek tool-calling endpoint ──────────────────
+        const res = await apiRequest("POST", `/api/orders/${orderId}/chat`, {
+          message: trimmed,
+          history: chatHistory,
+        });
+        const data = (await res.json()) as {
+          reply: string;
+          order_preview: OrderPreview | null;
+          meta?: { error?: string };
+        };
+
+        const newHistory: ChatMessage[] = [
+          ...chatHistory,
+          { role: "user", content: trimmed },
+          { role: "assistant", content: data.reply },
+        ];
+        setChatHistory(newHistory);
+
+        setAnswers((prev) => [
+          ...prev,
+          {
+            question: trimmed,
+            answer: data.reply,
+            sources: [],
+            orderPreview: data.order_preview,
+            isOrderingMode: true,
+          },
+        ]);
+      } else {
+        // ── General Q&A: existing knowledge-base endpoint ─────────────────
+        const res = await apiRequest("POST", "/api/ai/guest-assistant", {
+          orderId,
+          question: trimmed,
+        });
+        const data = (await res.json()) as { answer: string; sources: Source[] };
+        setAnswers((prev) => [
+          ...prev,
+          { question: trimmed, answer: data.answer, sources: data.sources },
+        ]);
+      }
+
       setQuestion("");
     } catch {
-      toast({ title: t("ga.error_title"), description: t("ga.error_desc"), variant: "destructive" });
+      toast({
+        title: t("ga.error_title"),
+        description: t("ga.error_desc"),
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -79,6 +138,21 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
       e.preventDefault();
       handleAsk();
     }
+  }
+
+  function handleOrderConfirmed() {
+    setOrderingMode(false);
+    setChatHistory([]);
+  }
+
+  function handleOrderDismissed(answerIndex: number) {
+    setAnswers((prev) =>
+      prev.map((a, i) =>
+        i === answerIndex ? { ...a, orderPreview: null } : a
+      )
+    );
+    setOrderingMode(false);
+    setChatHistory([]);
   }
 
   return (
@@ -93,6 +167,12 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
           <CardTitle className="flex items-center gap-2 text-base font-semibold">
             <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
             {t("ga.title")}
+            {orderingMode && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                <ShoppingBag className="h-2.5 w-2.5 mr-1 inline" />
+                Ordering
+              </Badge>
+            )}
           </CardTitle>
           {open ? (
             <ChevronUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -104,11 +184,18 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
 
       {open && (
         <CardContent className="space-y-4 pt-0">
-          <p className="text-sm text-muted-foreground">{t("ga.subtitle")}</p>
+          <p className="text-sm text-muted-foreground">
+            {orderingMode ? "Place your order using our AI assistant." : t("ga.subtitle")}
+          </p>
 
-          {/* Q&A history */}
+          {/* Q&A / ordering history */}
           {answers.length > 0 && (
-            <div className="space-y-4 max-h-80 overflow-y-auto pr-1" role="log" aria-live="polite" aria-label={t("ga.history_label")}>
+            <div
+              className="space-y-4 max-h-80 overflow-y-auto pr-1"
+              role="log"
+              aria-live="polite"
+              aria-label={t("ga.history_label")}
+            >
               {answers.map((a, i) => (
                 <div key={i} className="space-y-2">
                   {/* Question bubble */}
@@ -120,17 +207,26 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
 
                   {/* Answer bubble */}
                   <div className="flex justify-start">
-                    <div className="bg-muted rounded-md px-3 py-2 text-sm max-w-[90%] space-y-2">
-                      <p>{a.answer}</p>
+                    <div className="bg-muted rounded-md px-3 py-2 text-sm max-w-[90%] space-y-2 w-full">
+                      {/* Strip the JSON code block from display when we have an order preview */}
+                      <p className="whitespace-pre-wrap">
+                        {a.orderPreview
+                          ? a.answer.replace(/```(?:json)?\s*[\s\S]*?```/g, "").trim()
+                          : a.answer}
+                      </p>
 
-                      {/* Sources */}
-                      {a.sources.length > 0 && (
+                      {/* Sources (Q&A mode) */}
+                      {!a.isOrderingMode && a.sources.length > 0 && (
                         <div className="border-t border-border pt-2 space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">{t("ga.sources")}</p>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {t("ga.sources")}
+                          </p>
                           {a.sources.map((src, si) => (
                             <div key={si} className="flex items-start gap-1">
                               <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">
-                                {src.type === "web" ? t("ga.source_web") : src.category ?? t("ga.source_kb")}
+                                {src.type === "web"
+                                  ? t("ga.source_web")
+                                  : src.category ?? t("ga.source_kb")}
                               </Badge>
                               <div className="flex-1 min-w-0">
                                 {src.url ? (
@@ -142,15 +238,30 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
                                     data-testid={`link-source-${si}`}
                                   >
                                     {src.title}
-                                    <ExternalLink className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                                    <ExternalLink
+                                      className="h-2.5 w-2.5 shrink-0"
+                                      aria-hidden="true"
+                                    />
                                   </a>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground truncate block">{src.title}</span>
+                                  <span className="text-xs text-muted-foreground truncate block">
+                                    {src.title}
+                                  </span>
                                 )}
                               </div>
                             </div>
                           ))}
                         </div>
+                      )}
+
+                      {/* Order confirmation panel (ordering mode only) */}
+                      {a.orderPreview && !a.orderPreview.requires_clarification && (
+                        <OrderConfirmation
+                          orderId={orderId}
+                          orderPreview={a.orderPreview}
+                          onConfirmed={handleOrderConfirmed}
+                          onDismiss={() => handleOrderDismissed(i)}
+                        />
                       )}
                     </div>
                   </div>
@@ -166,7 +277,11 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder }: G
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={t("ga.placeholder")}
+              placeholder={
+                orderingMode
+                  ? "Describe your order or ask about menu items…"
+                  : t("ga.placeholder")
+              }
               className="resize-none text-sm min-h-[60px]"
               rows={2}
               disabled={isLoading}

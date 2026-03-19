@@ -55,6 +55,10 @@ export function useAdminWebSocket(
             if (message.type === "admin_update" && message.eventType) {
               onEventRef.current(message.eventType, message.orderId ?? "");
             }
+
+            if (message.type === "ORDER_CONFIRMED" && message.orderId) {
+              onEventRef.current("ORDER_CONFIRMED", message.orderId as string);
+            }
           } catch (e) {
             console.warn("[Admin WS] Failed to parse message:", e);
           }
