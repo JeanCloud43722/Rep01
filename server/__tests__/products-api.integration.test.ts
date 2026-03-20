@@ -135,7 +135,7 @@ describe("GET /api/products — ETag / 304 caching", () => {
   it("sets Cache-Control header", async () => {
     const res = await request(app).get("/api/products");
     expect(res.status).toBe(200);
-    expect(res.headers["cache-control"]).toContain("s-maxage=60");
-    expect(res.headers["cache-control"]).toContain("stale-while-revalidate=30");
+    expect(res.headers["cache-control"]).toContain("s-maxage=300");
+    expect(res.headers["cache-control"]).toContain("stale-while-revalidate=60");
   });
 });

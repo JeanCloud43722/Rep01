@@ -18,6 +18,7 @@ import { getReplySuggestion, getGuestAnswer } from "./lib/deepseek";
 import { aiRateLimiter } from "./middleware/rate-limit";
 import { retrieveRelevantChunks, getChunkCount } from "./lib/knowledge-base/retriever";
 import { processKnowledgeBase } from "./lib/knowledge-base/processor";
+import { extractAll } from "./lib/extract-products";
 import { webSearch } from "./lib/web-search";
 import { products } from "../shared/schema";
 import { eventBus, type MenuEvent, type OrderEvent } from "./lib/event-bus";
@@ -1189,7 +1190,7 @@ export async function registerRoutes(
         return res.status(304).end();
       }
 
-      res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=30");
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=60");
       res.json({
         products: filtered,
         meta: { total: filtered.length, filters: { category, categoryGroup, search, tags }, limit },
@@ -1197,6 +1198,36 @@ export async function registerRoutes(
     } catch (error) {
       logger.error("Products fetch error", { source: "products", error: (error as Error).message });
       res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  // ── Admin: Trigger product catalog extraction from PDFs ──
+  app.post("/api/admin/extract-products", requireAuth, async (req, res) => {
+    try {
+      const bodySchema = z.object({
+        dryRun: z.boolean().default(false),
+        skipImages: z.boolean().default(false),
+        category: z.string().optional(),
+      });
+      const { dryRun, skipImages, category } = bodySchema.parse(req.body);
+
+      if (!process.env.DEEPSEEK_API_KEY) {
+        return res.status(503).json({ error: "DEEPSEEK_API_KEY is not configured — extraction unavailable." });
+      }
+
+      logger.info("Admin triggered product extraction", {
+        source: "extractor",
+        dryRun,
+        skipImages,
+        category: category ?? "all",
+      });
+
+      const summary = await extractAll(dryRun, skipImages, category);
+
+      return res.json({ success: true, summary });
+    } catch (err) {
+      logger.error("Product extraction failed", { source: "extractor", err: String(err) });
+      return res.status(500).json({ error: "Extraction failed", detail: String(err) });
     }
   });
 

@@ -17,7 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox, LayoutGrid, Columns } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox, LayoutGrid, Columns, PackageSearch } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -1360,6 +1360,23 @@ export default function AdminPage() {
     updateNotesMutation.mutate({ orderId, notes });
   };
 
+  const extractProductsMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/admin/extract-products", { dryRun: false, skipImages: false });
+    },
+    onSuccess: (data: any) => {
+      const s = data?.summary;
+      const desc = s
+        ? `Inserted: ${s.inserted}, Updated: ${s.updated}, Skipped: ${s.skipped}`
+        : "Catalog updated.";
+      toast({ title: "Catalog extraction complete", description: desc });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: () => {
+      toast({ title: "Extraction failed", description: "Check server logs for details.", variant: "destructive" });
+    }
+  });
+
   const handleActivityEventClick = (event: AppEvent) => {
     // Mark event as read
     setFeedEvents((prev) =>
@@ -1626,6 +1643,22 @@ export default function AdminPage() {
                     </DropdownMenuItem>
                   </>
                 )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (!confirm("Re-extract product catalog from menu PDFs? This may take a minute.")) return;
+                    extractProductsMutation.mutate();
+                  }}
+                  disabled={extractProductsMutation.isPending}
+                  data-testid="menu-item-extract-products"
+                >
+                  {extractProductsMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <PackageSearch className="h-4 w-4 mr-2" />
+                  )}
+                  {extractProductsMutation.isPending ? "Extracting…" : "Update Menu Catalog"}
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   onClick={() => logoutMutation.mutate()}
