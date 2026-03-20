@@ -17,11 +17,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox, LayoutGrid, Columns } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { 
   Plus, 
   Bell, 
@@ -128,7 +129,8 @@ function OrderCard({
   onComplete,
   onReactivate,
   hasUnreadMsg = false,
-  hasUnackSvcReq = false
+  hasUnackSvcReq = false,
+  variant = "default"
 }: { 
   order: Order; 
   onShowQR: (order: Order) => void;
@@ -142,6 +144,7 @@ function OrderCard({
   onReactivate: (orderId: string, resetMessages: boolean) => void;
   hasUnreadMsg?: boolean;
   hasUnackSvcReq?: boolean;
+  variant?: "default" | "compact";
 }) {
   const canNotify = order.subscription || order.status === "subscribed" || order.status === "scheduled" || order.status === "notified" || order.status === "completed";
   const { toast } = useToast();
@@ -990,6 +993,20 @@ export default function AdminPage() {
   const isAdminMutedRef = useRef(isAdminMuted);
   useEffect(() => { isAdminMutedRef.current = isAdminMuted; }, [isAdminMuted]);
 
+  // ── VIEW MODE STATE (Grid/Kanban) ──
+  type ViewMode = "grid" | "kanban";
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("admin-view-mode") as ViewMode;
+      return saved || "grid";
+    }
+    return "grid";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("admin-view-mode", viewMode);
+  }, [viewMode]);
+
   // ── ACTIVITY FEED STATE ──
   const [feedEvents, setFeedEvents] = useState<AppEvent[]>([]);
   const [isFeedOpen, setIsFeedOpen] = useState(false);
@@ -1502,6 +1519,24 @@ export default function AdminPage() {
               {audioEnabled ? "Sound On" : "Tap to enable sound"}
             </Badge>
             
+            {/* View Mode Toggle */}
+            <ToggleGroup
+              type="single"
+              value={viewMode}
+              onValueChange={(value) => value && setViewMode(value as ViewMode)}
+              className="bg-muted rounded-md p-0.5"
+              data-testid="toggle-view-mode"
+            >
+              <ToggleGroupItem value="grid" aria-label="Grid view" className="data-[state=on]:bg-background text-xs" data-testid="toggle-grid-view">
+                <LayoutGrid className="w-4 h-4 mr-1" />
+                Grid
+              </ToggleGroupItem>
+              <ToggleGroupItem value="kanban" aria-label="Kanban view" className="data-[state=on]:bg-background text-xs" data-testid="toggle-kanban-view">
+                <Columns className="w-4 h-4 mr-1" />
+                Kanban
+              </ToggleGroupItem>
+            </ToggleGroup>
+            
             {/* Activity Feed Bell Button */}
             <div className="relative">
               <Button 
@@ -1633,7 +1668,7 @@ export default function AdminPage() {
               <OrdersSkeleton />
             ) : activeOrders.length === 0 ? (
               <EmptyState onCreateOrder={handleCreateOrder} />
-            ) : (
+            ) : viewMode === "grid" ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {sortedActiveOrders.map((order) => (
                   <OrderCard
@@ -1650,8 +1685,110 @@ export default function AdminPage() {
                     onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
                     hasUnreadMsg={hasUnreadMessage(order)}
                     hasUnackSvcReq={hasUnackServiceRequest(order)}
+                    variant="default"
                   />
                 ))}
+              </div>
+            ) : (
+              <div className="flex gap-4 overflow-x-auto pb-4">
+                {/* Column 1: Waiting/Scheduled */}
+                <div className="flex-shrink-0 w-80 bg-muted rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-yellow-400 rounded-full" />
+                    Waiting / Scheduled
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {sortedActiveOrders.filter(o => ['waiting', 'scheduled'].includes(o.status)).length}
+                    </span>
+                  </h4>
+                  <div className="space-y-3">
+                    {sortedActiveOrders
+                      .filter(order => ['waiting', 'scheduled'].includes(order.status))
+                      .map(order => (
+                        <OrderCard
+                          key={order.id}
+                          order={order}
+                          onShowQR={setSelectedOrder}
+                          onTrigger={setNotifyOrderId}
+                          onSchedule={setScheduleOrderId}
+                          onDelete={(id) => deleteOrderMutation.mutate(id)}
+                          onAddOffer={setOfferOrderId}
+                          onEditNotes={setNotesOrderId}
+                          onSendMessage={setMessageOrderId}
+                          onComplete={(id) => completeOrderMutation.mutate(id)}
+                          onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
+                          hasUnreadMsg={hasUnreadMessage(order)}
+                          hasUnackSvcReq={hasUnackServiceRequest(order)}
+                          variant="compact"
+                        />
+                      ))}
+                  </div>
+                </div>
+
+                {/* Column 2: Subscribed/Preparing */}
+                <div className="flex-shrink-0 w-80 bg-muted rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-blue-400 rounded-full" />
+                    Preparing
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {sortedActiveOrders.filter(o => ['subscribed', 'notified'].includes(o.status)).length}
+                    </span>
+                  </h4>
+                  <div className="space-y-3">
+                    {sortedActiveOrders
+                      .filter(order => ['subscribed', 'notified'].includes(order.status))
+                      .map(order => (
+                        <OrderCard
+                          key={order.id}
+                          order={order}
+                          onShowQR={setSelectedOrder}
+                          onTrigger={setNotifyOrderId}
+                          onSchedule={setScheduleOrderId}
+                          onDelete={(id) => deleteOrderMutation.mutate(id)}
+                          onAddOffer={setOfferOrderId}
+                          onEditNotes={setNotesOrderId}
+                          onSendMessage={setMessageOrderId}
+                          onComplete={(id) => completeOrderMutation.mutate(id)}
+                          onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
+                          hasUnreadMsg={hasUnreadMessage(order)}
+                          hasUnackSvcReq={hasUnackServiceRequest(order)}
+                          variant="compact"
+                        />
+                      ))}
+                  </div>
+                </div>
+
+                {/* Column 3: Completed */}
+                <div className="flex-shrink-0 w-80 bg-muted rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-green-400 rounded-full" />
+                    Completed
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {sortedActiveOrders.filter(o => o.status === 'completed').length}
+                    </span>
+                  </h4>
+                  <div className="space-y-3">
+                    {sortedActiveOrders
+                      .filter(order => order.status === 'completed')
+                      .map(order => (
+                        <OrderCard
+                          key={order.id}
+                          order={order}
+                          onShowQR={setSelectedOrder}
+                          onTrigger={setNotifyOrderId}
+                          onSchedule={setScheduleOrderId}
+                          onDelete={(id) => deleteOrderMutation.mutate(id)}
+                          onAddOffer={setOfferOrderId}
+                          onEditNotes={setNotesOrderId}
+                          onSendMessage={setMessageOrderId}
+                          onComplete={(id) => completeOrderMutation.mutate(id)}
+                          onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
+                          hasUnreadMsg={hasUnreadMessage(order)}
+                          hasUnackSvcReq={hasUnackServiceRequest(order)}
+                          variant="compact"
+                        />
+                      ))}
+                  </div>
+                </div>
               </div>
             )}
           </TabsContent>
@@ -1661,7 +1798,7 @@ export default function AdminPage() {
               <div className="text-center py-12 text-muted-foreground">
                 No completed orders yet
               </div>
-            ) : (
+            ) : viewMode === "grid" ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {completedOrders.map((order) => (
                   <OrderCard
@@ -1678,8 +1815,41 @@ export default function AdminPage() {
                     onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
                     hasUnreadMsg={hasUnreadMessage(order)}
                     hasUnackSvcReq={hasUnackServiceRequest(order)}
+                    variant="default"
                   />
                 ))}
+              </div>
+            ) : (
+              <div className="flex gap-4 overflow-x-auto pb-4">
+                <div className="flex-shrink-0 w-80 bg-muted rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-green-400 rounded-full" />
+                    Completed Orders
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {completedOrders.length}
+                    </span>
+                  </h4>
+                  <div className="space-y-3">
+                    {completedOrders.map((order) => (
+                      <OrderCard
+                        key={order.id}
+                        order={order}
+                        onShowQR={setSelectedOrder}
+                        onTrigger={setNotifyOrderId}
+                        onSchedule={setScheduleOrderId}
+                        onDelete={(id) => deleteOrderMutation.mutate(id)}
+                        onAddOffer={setOfferOrderId}
+                        onEditNotes={setNotesOrderId}
+                        onSendMessage={setMessageOrderId}
+                        onComplete={(id) => completeOrderMutation.mutate(id)}
+                        onReactivate={(id, reset) => reactivateOrderMutation.mutate({ orderId: id, resetMessages: reset })}
+                        hasUnreadMsg={hasUnreadMessage(order)}
+                        hasUnackSvcReq={hasUnackServiceRequest(order)}
+                        variant="compact"
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </TabsContent>
