@@ -322,6 +322,10 @@ export default function CustomerPage() {
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   const [pushEnabled, setPushEnabled] = useState(() => typeof window !== "undefined" && Notification.permission === "granted");
+  
+  // ── Refs for tracking one-time actions per page load ──
+  const audioUnlockedOnceRef = useRef(audioManager.isUnlocked);
+  const pushRequestedOnceRef = useRef(false);
 
   // ── connection state ──
   const [wsConnected, setWsConnected] = useState(false);
@@ -361,19 +365,24 @@ export default function CustomerPage() {
   const subscribeToPushSilent = useCallback(async () => {
     if (!orderId) return;
     try {
+      console.log("[Push] Starting push subscription for order:", orderId);
       const { publicKey } = await fetch("/api/vapid-public-key").then((r) => r.json());
       const reg = await navigator.serviceWorker.ready;
+      console.log("[Push] Service worker ready, subscribing to push manager...");
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
       // Android debug: log the push service host (should be fcm.googleapis.com on Android)
       const subJson = sub.toJSON() as { endpoint?: string };
       if (subJson.endpoint) {
         const pushHost = subJson.endpoint.split("/")[2];
-        console.log("[Push] Subscribed via:", pushHost);
-        console.log("[Push] Endpoint origin:", pushHost?.includes("fcm.googleapis") ? "Android FCM" : pushHost?.includes("push.apple") ? "Apple APNs" : "Other/Desktop");
+        const serviceType = pushHost?.includes("fcm.googleapis") ? "Android FCM" : pushHost?.includes("push.apple") ? "Apple APNs" : "Other/Desktop";
+        console.log("[Push] Successfully subscribed via:", pushHost, `(${serviceType})`);
       }
+      console.log("[Push] Registering subscription with backend...");
       await apiRequest("POST", `/api/orders/${orderId}/subscribe`, { subscription: sub.toJSON() });
+      console.log("[Push] Backend registration successful");
       setPushEnabled(true);
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      console.log("[Push] Push notifications enabled for this session");
     } catch (e) {
       console.error("[Push] Subscription failed:", e);
     }
@@ -381,30 +390,49 @@ export default function CustomerPage() {
 
   // ── Manual "Enable Notifications" button handler ──
   const autoEnable = useCallback(async () => {
+    console.log("[AutoEnable] User triggered enable-notifications button");
+    
     // Audio
     const ctx = audioManager.getContext();
     if (ctx && ctx.state === "suspended") {
-      try { await ctx.resume(); } catch {}
+      try {
+        await ctx.resume();
+        console.log("[AutoEnable] AudioContext resumed");
+      } catch (e) {
+        console.warn("[AutoEnable] AudioContext resume failed:", e);
+      }
     }
     if (!audioManager.isUnlocked) {
       try {
+        console.log("[AutoEnable] Attempting to unlock audio...");
         const ok = await audioManager.unlock();
         if (ok) {
+          audioUnlockedOnceRef.current = true;
           setAudioUnlocked(true);
+          console.log("[AutoEnable] Audio unlocked successfully");
           if (!isMutedRef.current) playBuzzer();
         }
       } catch (e) {
-        console.warn("[AutoEnable] Audio:", e);
+        console.warn("[AutoEnable] Audio unlock failed:", e);
       }
     }
+    
     // Push
     if ("Notification" in window && "serviceWorker" in navigator && orderId) {
       try {
         let perm = Notification.permission;
-        if (perm === "default") perm = await Notification.requestPermission();
-        if (perm === "granted" && !pushEnabled) subscribeToPushSilent();
+        console.log("[AutoEnable] Current notification permission:", perm);
+        if (perm === "default") {
+          console.log("[AutoEnable] Requesting push permission...");
+          perm = await Notification.requestPermission();
+          console.log("[AutoEnable] Permission request result:", perm);
+        }
+        if (perm === "granted" && !pushEnabled) {
+          console.log("[AutoEnable] Subscribing to push notifications...");
+          subscribeToPushSilent();
+        }
       } catch (e) {
-        console.warn("[AutoEnable] Push:", e);
+        console.warn("[AutoEnable] Push setup failed:", e);
       }
     }
   }, [orderId, pushEnabled, playBuzzer, subscribeToPushSilent]);
@@ -426,29 +454,26 @@ export default function CustomerPage() {
 
   // ── Consolidated interaction handler: audio resume + push on every gesture ──
   useEffect(() => {
-    let audioUnlockedOnce = audioManager.isUnlocked;
-    let pushRequestedOnce = pushEnabled;
-
     const handleInteraction = async () => {
       // 1. Always resume a suspended AudioContext (iOS suspends it on background/lock)
       const ctx = audioManager.getContext();
       if (ctx && ctx.state === "suspended") {
         try {
           await ctx.resume();
-          console.log("[Interaction] AudioContext resumed");
+          console.log("[Interaction] AudioContext resumed from suspended state");
         } catch (e) {
           console.warn("[Interaction] AudioContext resume failed:", e);
         }
       }
 
       // 2. Unlock audio once per session (plays a silent prime + one confirmation chime)
-      if (!audioUnlockedOnce) {
+      if (!audioUnlockedOnceRef.current) {
         try {
           const ok = await audioManager.unlock();
           if (ok) {
-            audioUnlockedOnce = true;
+            audioUnlockedOnceRef.current = true;
             setAudioUnlocked(true);
-            console.log("[Interaction] Audio unlocked");
+            console.log("[Interaction] Audio unlocked successfully via user gesture");
             if (!isMutedRef.current) playBuzzer();
           }
         } catch (e) {
@@ -457,20 +482,22 @@ export default function CustomerPage() {
       }
 
       // 3. Request push-notification permission once per page load (if not yet granted)
-      if (!pushRequestedOnce && "Notification" in window && "serviceWorker" in navigator && orderId) {
-        pushRequestedOnce = true;
+      // ─ This ensures the browser's native permission prompt shows only once
+      if (!pushRequestedOnceRef.current && "Notification" in window && "serviceWorker" in navigator && orderId) {
+        pushRequestedOnceRef.current = true;
         try {
           let perm = Notification.permission;
-          console.log("[Interaction] Notification permission:", perm);
+          console.log("[Interaction] Current notification permission:", perm);
           if (perm === "default") {
+            console.log("[Interaction] Showing browser notification permission prompt...");
             perm = await Notification.requestPermission();
-            console.log("[Interaction] Permission result:", perm);
+            console.log("[Interaction] User response to permission prompt:", perm);
           }
           if (perm === "granted") {
-            console.log("[Interaction] Subscribing to push");
+            console.log("[Interaction] Notification permission granted – subscribing to push");
             subscribeToPushSilent();
           } else {
-            console.log("[Interaction] Push permission denied or dismissed");
+            console.log("[Interaction] Push permission denied or dismissed by user");
           }
         } catch (e) {
           console.warn("[Interaction] Push setup failed:", e);
@@ -481,7 +508,7 @@ export default function CustomerPage() {
     const EVENTS = ["touchstart", "click", "pointerdown", "mousedown", "keydown", "scroll"];
     EVENTS.forEach((ev) => document.addEventListener(ev, handleInteraction, { passive: true }));
     return () => EVENTS.forEach((ev) => document.removeEventListener(ev, handleInteraction));
-  }, [orderId, pushEnabled, playBuzzer, subscribeToPushSilent]);
+  }, [orderId, playBuzzer, subscribeToPushSilent]);
 
   useEffect(() => audioManager.onUnlockChange(setAudioUnlocked), []);
 
