@@ -1,0 +1,71 @@
+```json
+{
+  "id": 30,
+  "title": "Admin Product Management Interface – Full CRUD with Image Upload",
+  "priority": "P1-High",
+  "context": "The `products` table is populated via the extraction script, but restaurant staff need a way to view, edit, add, and delete products manually. They also need to manage product images – either upload photos or generate placeholders. The existing admin dashboard needs a new 'Products' section.",
+  "task": "Build a complete admin interface for product management with a table view, create/edit modal, image upload, and integration with the existing product API. Ensure all changes are reflected in the customer catalog immediately.",
+  "detailed_instructions": [
+    "## 1. Backend: CRUD Endpoints for Products",
+    "- Add the following REST endpoints (protected by admin auth):",
+    "  - `GET /api/admin/products` – list all products (supports pagination, search, filtering).",
+    "  - `GET /api/admin/products/:id` – get single product for editing.",
+    "  - `POST /api/admin/products` – create a new product.",
+    "  - `PUT /api/admin/products/:id` – update an existing product.",
+    "  - `DELETE /api/admin/products/:id` – delete a product.",
+    "- All endpoints should validate input using the existing `productSchema`.",
+    "- For updates, use `ON CONFLICT` logic? No, just update by id.",
+    "- Ensure that changes invalidate any cached data (e.g., bump a `products_updated_at` timestamp or use cache tags).",
+    
+    "## 2. Image Upload Handling",
+    "- Add an image upload endpoint `POST /api/admin/products/upload-image` that accepts a multipart file (e.g., using `multer`).",
+    "- Store images in a dedicated folder (e.g., `public/product-images/`) with a unique filename (UUID + original extension).",
+    "- Return the public URL (e.g., `/product-images/filename.jpg`) to be stored in the `image_url` field.",
+    "- On product deletion, also delete the associated image file.",
+    "- For development, you can also store images as base64 in the database, but file storage is more efficient.",
+    "- Ensure the folder is served statically by Express (already does for `public`).",
+    
+    "## 3. Frontend: Admin Products Page",
+    "- Create a new file `client/src/pages/admin/products.tsx`.",
+    "- Add a route in `App.tsx`: `/admin/products` (protected).",
+    "- Add a navigation link in the admin sidebar/dropdown (e.g., next to 'Orders').",
+    "- The page should have:",
+    "  - A search bar (debounced) and category filter.",
+    "  - A table of products with columns: Image (thumbnail), Name, Category, Price, Actions (Edit, Delete).",
+    "  - A 'Add Product' button that opens a modal/form.",
+    "- Use React Query for data fetching with automatic cache invalidation after mutations.",
+    
+    "## 4. Product Edit/Create Modal",
+    "- Modal form with fields:",
+    "  - Name (text, required)",
+    "  - Description (textarea, optional)",
+    "  - Price (number, required, step 0.01)",
+    "  - Category (select dropdown with existing categories, plus option to add new)",
+    "  - Allergens (multi-select or tag input)",
+    "  - Tags (multi-select with predefined options like 'vegetarian', 'vegan', 'gluten-free', 'spicy', 'popular', 'seasonal')",
+    "  - Image upload area (drag-and-drop or file picker) with preview.",
+    "- On submit, send data to the appropriate endpoint.",
+    "- After successful mutation, close modal and refresh the product list.",
+    
+    "## 5. Integration with Existing Extraction",
+    "- In the admin products page, add a 'Run Extraction' button (already present from Prompt 27 enhancement).",
+    "- When clicked, it should call `POST /api/admin/extract-products` and show a progress indicator (toast with success/failure).",
+    "- After extraction, refresh the product list automatically.",
+    
+    "## 6. Testing & Verification",
+    "- Test all CRUD operations: create, edit, delete, and verify changes appear in the customer catalog.",
+    "- Test image upload: ensure files are saved and served correctly.",
+    "- Test that the extraction button still works and updates products without duplicating.",
+    "- Ensure all admin routes are protected (use `requireAuth` middleware)."
+  ],
+  "replit_note": "Use `multer` for file uploads. The `public/product-images/` folder must be writable. Consider adding a default placeholder image for products without an image. The admin UI should match the existing shadcn/ui style.",
+  "testing_checkpoint": [
+    "1. Navigate to `/admin/products` – table loads existing products.",
+    "2. Add a new product – appears in list and in customer catalog.",
+    "3. Edit a product – changes reflected.",
+    "4. Delete a product – removed from list and catalog.",
+    "5. Upload an image – file saved and URL stored; thumbnail shows in table.",
+    "6. Run extraction – products update without duplicates."
+  ]
+}
+```
