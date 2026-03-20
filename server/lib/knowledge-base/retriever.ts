@@ -30,6 +30,12 @@ export function getChunkCount(): number {
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
+    // Normalize German umlauts and accents before removing special chars
+    .replace(/ä/g, "a")
+    .replace(/ö/g, "o")
+    .replace(/ü/g, "u")
+    .replace(/ß/g, "ss")
+    // Remove other special characters but keep word boundaries
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
     .filter((t) => t.length > 2);
@@ -44,12 +50,14 @@ export function retrieveRelevantChunks(query: string, topK = 5): RetrievalResult
   const N = chunks.length;
 
   // Compute document frequency for each query term
+  // Uses prefix matching to handle compound words (e.g., "pute" matches "putenbruststeaks")
   const df = new Map<string, number>();
   for (const chunk of chunks) {
-    const termSet = new Set(tokenize(chunk.text));
-    for (const term of queryTerms) {
-      if (termSet.has(term)) {
-        df.set(term, (df.get(term) ?? 0) + 1);
+    const terms = tokenize(chunk.text);
+    for (const queryTerm of queryTerms) {
+      const matches = terms.some((term) => term.startsWith(queryTerm) || queryTerm.startsWith(term));
+      if (matches) {
+        df.set(queryTerm, (df.get(queryTerm) ?? 0) + 1);
       }
     }
   }
@@ -63,17 +71,35 @@ export function retrieveRelevantChunks(query: string, topK = 5): RetrievalResult
     }
 
     let score = 0;
-    for (const term of queryTerms) {
-      const tfScore = (tf.get(term) ?? 0) / Math.max(terms.length, 1);
-      const idf = Math.log((N + 1) / ((df.get(term) ?? 0) + 1));
+    for (const queryTerm of queryTerms) {
+      // TF: use prefix matching to find matching terms
+      let termTF = 0;
+      for (const term of terms) {
+        if (term.startsWith(queryTerm) || queryTerm.startsWith(term)) {
+          termTF += (tf.get(term) ?? 0);
+        }
+      }
+
+      const tfScore = termTF / Math.max(terms.length, 1);
+      const idf = Math.log((N + 1) / ((df.get(queryTerm) ?? 0) + 1));
       score += tfScore * idf;
     }
 
     return { chunk, score };
   });
 
-  return scored
+  const results = scored
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
+
+  logger.info("RAG retrieval results", {
+    source: "retriever",
+    query,
+    queryTerms,
+    documentsFound: results.length,
+    topScores: results.map((r) => ({ score: r.score.toFixed(4), source: r.chunk.metadata.source })),
+  });
+
+  return results;
 }

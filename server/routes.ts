@@ -1219,7 +1219,8 @@ export async function registerRoutes(
       }
 
       // Retrieve relevant knowledge base chunks
-      const rawChunks = retrieveRelevantChunks(question, 5);
+      // Using topK=10 to capture more relevant results (esp. for rare/specific terms like "pute")
+      const rawChunks = retrieveRelevantChunks(question, 10);
       const knowledgeChunks = rawChunks.map((r) => ({
         text: r.chunk.text,
         source: r.chunk.metadata.source,
