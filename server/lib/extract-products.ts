@@ -10,9 +10,9 @@ import { generatePlaceholderImage, resetImageGenCount } from "./generate-product
 
 const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024;
 const DEEPSEEK_TIMEOUT_MS = 60_000;
-const CHUNK_MAX_CHARS = 12_000;
+const CHUNK_MAX_CHARS = 3_500;
 const KB_ROOT = path.join(process.cwd(), "knowledge-base");
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 1;
 
 export interface ExtractionSummary {
   processed: number;
@@ -125,7 +125,7 @@ async function callDeepSeekWithRetry(
           { role: "user", content: `Extract products from this menu text:\n\n${textChunk}` },
         ],
         temperature: 0.1,
-        max_tokens: 4000,
+        max_tokens: 1500,
         response_format: { type: "json_object" },
       }),
     });
