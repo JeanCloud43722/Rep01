@@ -1653,6 +1653,14 @@ export default function AdminPage() {
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
+                  onClick={() => navigate("/admin/products")}
+                  data-testid="menu-item-manage-products"
+                >
+                  <PackageSearch className="h-4 w-4 mr-2" />
+                  Manage Products
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
                   onClick={() => {
                     if (!confirm("Re-extract product catalog from menu PDFs? This may take a minute.")) return;
                     extractProductsMutation.mutate();

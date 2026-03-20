@@ -1,13 +1,16 @@
 import type { Express, RequestHandler } from "express";
 import { createServer, type Server, type IncomingMessage } from "http";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, unlinkSync, createReadStream } from "fs";
+import path from "path";
+import multer from "multer";
+import { randomUUID } from "crypto";
 import { storage } from "./storage";
 import { getPool, getDb } from "./db";
 import webPush from "web-push";
 import schedule from "node-schedule";
 import { pushSubscriptionSchema, adminUsers } from "@shared/schema";
 import { z } from "zod";
-import { eq, ilike, and, or, inArray } from "drizzle-orm";
+import { eq, ilike, and, or, inArray, desc } from "drizzle-orm";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfig } from "./env-validation";
 import { logger } from "./lib/logger";
@@ -1324,6 +1327,208 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid cleanup parameters" });
       }
       res.status(500).json({ error: "Cleanup failed" });
+    }
+  });
+
+  // ── Admin: Product CRUD + Image Upload ──────────────────────────────────────
+
+  // Ensure product images directory exists
+  const PRODUCT_IMAGES_DIR = path.join(process.cwd(), "public", "product-images");
+  if (!existsSync(PRODUCT_IMAGES_DIR)) mkdirSync(PRODUCT_IMAGES_DIR, { recursive: true });
+
+  // Serve product images statically
+  app.get("/product-images/:filename", (req, res) => {
+    const filename = path.basename(req.params.filename);
+    const filepath = path.join(PRODUCT_IMAGES_DIR, filename);
+    if (!existsSync(filepath)) return res.status(404).end();
+    const ext = path.extname(filename).toLowerCase();
+    const mime: Record<string, string> = {
+      ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+      ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
+    };
+    res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=31536000");
+    createReadStream(filepath).pipe(res);
+  });
+
+  const productImageUpload = multer({
+    storage: multer.diskStorage({
+      destination: PRODUCT_IMAGES_DIR,
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+        cb(null, `${randomUUID()}${ext}`);
+      },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype.startsWith("image/")) cb(null, true);
+      else cb(new Error("Only image files are allowed"));
+    },
+  });
+
+  // Admin product validation schema
+  const adminProductSchema = z.object({
+    name: z.string().min(1).max(150).transform((s) => s.trim()),
+    description: z.string().max(500).nullable().optional(),
+    price: z.number().positive().max(9999.99).nullable().optional(),
+    category: z.string().min(1).max(80).transform((s) => s.trim().toLowerCase()),
+    categoryGroup: z.string().max(80).nullable().optional(),
+    variants: z.array(z.object({
+      name: z.string().min(1),
+      price: z.number().positive(),
+      description: z.string().optional(),
+    })).nullable().optional(),
+    defaultVariant: z.string().nullable().optional(),
+    allergens: z.array(z.string()).default([]),
+    tags: z.array(z.string()).default([]),
+    imageUrl: z.string().nullable().optional(),
+    isActive: z.boolean().default(true),
+  });
+
+  // POST /api/admin/products/upload-image — must be before /:id routes
+  app.post("/api/admin/products/upload-image", requireAuth,
+    productImageUpload.single("image") as RequestHandler,
+    (req, res) => {
+      if (!req.file) return res.status(400).json({ error: "No image file received" });
+      res.json({ url: `/product-images/${req.file.filename}` });
+    }
+  );
+
+  // GET /api/admin/products — list all (including inactive)
+  app.get("/api/admin/products", requireAuth, async (req, res) => {
+    try {
+      const { search, category, isActive } = req.query as Record<string, string | undefined>;
+      const db = getDb();
+      const conditions: ReturnType<typeof eq>[] = [];
+
+      if (search) {
+        const pat = `%${search}%`;
+        conditions.push(
+          or(ilike(products.name, pat), ilike(products.description, pat)) as ReturnType<typeof eq>
+        );
+      }
+      if (category) conditions.push(eq(products.category, category.toLowerCase()));
+      if (isActive === "true") conditions.push(eq(products.isActive, true) as ReturnType<typeof eq>);
+      if (isActive === "false") conditions.push(eq(products.isActive, false) as ReturnType<typeof eq>);
+
+      const rows = await db
+        .select()
+        .from(products)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(products.updatedAt))
+        .limit(500);
+
+      res.json({ products: rows, meta: { total: rows.length } });
+    } catch (error) {
+      logger.error("Admin products list error", { source: "admin-products", error: String(error) });
+      res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  // GET /api/admin/products/:id — get single product
+  app.get("/api/admin/products/:id", requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid product ID" });
+    const db = getDb();
+    const [product] = await db.select().from(products).where(eq(products.id, id));
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    res.json(product);
+  });
+
+  // POST /api/admin/products — create product
+  app.post("/api/admin/products", requireAuth, async (req, res) => {
+    try {
+      const data = adminProductSchema.parse(req.body);
+      const db = getDb();
+      const [created] = await db
+        .insert(products)
+        .values({
+          name: data.name,
+          description: data.description ?? null,
+          price: data.price != null ? String(data.price) : null,
+          category: data.category,
+          categoryGroup: data.categoryGroup ?? null,
+          variants: data.variants ?? null,
+          defaultVariant: data.defaultVariant ?? null,
+          allergens: data.allergens,
+          tags: data.tags,
+          imageUrl: data.imageUrl ?? null,
+          isActive: data.isActive,
+        })
+        .returning();
+      eventBus.emit("menu:updated", { source: "admin-products" } as MenuEvent);
+      logger.info("Admin created product", { source: "admin-products", id: created.id, name: created.name });
+      res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid product data", details: error.errors });
+      logger.error("Admin product create error", { source: "admin-products", error: String(error) });
+      res.status(500).json({ error: "Failed to create product" });
+    }
+  });
+
+  // PUT /api/admin/products/:id — update product
+  app.put("/api/admin/products/:id", requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid product ID" });
+    try {
+      const data = adminProductSchema.parse(req.body);
+      const db = getDb();
+      const [updated] = await db
+        .update(products)
+        .set({
+          name: data.name,
+          description: data.description ?? null,
+          price: data.price != null ? String(data.price) : null,
+          category: data.category,
+          categoryGroup: data.categoryGroup ?? null,
+          variants: data.variants ?? null,
+          defaultVariant: data.defaultVariant ?? null,
+          allergens: data.allergens,
+          tags: data.tags,
+          imageUrl: data.imageUrl ?? null,
+          isActive: data.isActive,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, id))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Product not found" });
+      eventBus.emit("menu:updated", { source: "admin-products" } as MenuEvent);
+      logger.info("Admin updated product", { source: "admin-products", id: updated.id });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid product data", details: error.errors });
+      logger.error("Admin product update error", { source: "admin-products", error: String(error) });
+      res.status(500).json({ error: "Failed to update product" });
+    }
+  });
+
+  // DELETE /api/admin/products/:id — delete product (also cleans up local image)
+  app.delete("/api/admin/products/:id", requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid product ID" });
+    try {
+      const db = getDb();
+      const [deleted] = await db.delete(products).where(eq(products.id, id)).returning();
+      if (!deleted) return res.status(404).json({ error: "Product not found" });
+      // Clean up local image if stored under /product-images/
+      if (deleted.imageUrl?.startsWith("/product-images/")) {
+        const filename = path.basename(deleted.imageUrl);
+        const filepath = path.join(PRODUCT_IMAGES_DIR, filename);
+        if (existsSync(filepath)) {
+          try { unlinkSync(filepath); } catch { /* ignore */ }
+        }
+      }
+      eventBus.emit("menu:updated", { source: "admin-products" } as MenuEvent);
+      logger.info("Admin deleted product", { source: "admin-products", id: deleted.id });
+      res.status(204).end();
+    } catch (error) {
+      const msg = String(error);
+      // Foreign key constraint — product has order items
+      if (msg.includes("foreign key") || msg.includes("violates")) {
+        return res.status(409).json({ error: "Cannot delete product with existing order records" });
+      }
+      logger.error("Admin product delete error", { source: "admin-products", error: msg });
+      res.status(500).json({ error: "Failed to delete product" });
     }
   });
 

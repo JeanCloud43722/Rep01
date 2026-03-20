@@ -9,6 +9,7 @@ import { ScreenReaderAnnounce } from "@/components/sr-announce";
 import { PageLoader } from "@/components/page-loader";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
+const AdminProductsPage = lazy(() => import("@/pages/admin-products"));
 const CustomerPage = lazy(() => import("@/pages/customer"));
 const LoginPage = lazy(() => import("@/pages/login"));
 const NotFound = lazy(() => import("@/pages/not-found"));
@@ -20,6 +21,7 @@ function Router() {
         <Route path="/login" component={LoginPage} />
         <Route path="/" component={AdminPage} />
         <Route path="/admin" component={AdminPage} />
+        <Route path="/admin/products" component={AdminProductsPage} />
         <Route path="/order/:id" component={CustomerPage} />
         <Route component={NotFound} />
       </Switch>
