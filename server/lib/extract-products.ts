@@ -10,7 +10,7 @@ import { generatePlaceholderImage, resetImageGenCount } from "./generate-product
 
 const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024;
 const DEEPSEEK_TIMEOUT_MS = 120_000;
-const CHUNK_MAX_CHARS = 3_500;
+const CHUNK_MAX_CHARS = 2_000;
 const KB_ROOT = path.join(process.cwd(), "knowledge-base");
 const MAX_RETRIES = 1;
 
@@ -230,7 +230,7 @@ async function upsertProducts(
     }
 
     const p = result.data;
-    const priceStr = p.price !== undefined ? String(p.price.toFixed(2)) : null;
+    const priceStr = p.price != null ? String(p.price.toFixed(2)) : null;
 
     if (dryRun) {
       const priceDisplay = p.variants

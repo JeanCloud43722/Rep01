@@ -195,7 +195,7 @@ export const productSchema = z.object({
   // OPT-2: fuzzy deduplication — DeepSeek may return an existing product ID
   existingProductId: z.number().int().positive().optional(),
 }).refine(
-  (data) => data.price !== undefined || (data.variants && data.variants.length > 0),
+  (data) => data.price != null || (data.variants != null && data.variants.length > 0),
   { message: "Product must have either price or variants" }
 );
 
