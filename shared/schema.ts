@@ -180,11 +180,11 @@ export const productSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   // OPT-1: Category is a free-form string (lowercase-normalised), not an enum
   category: z.string().min(1).max(50).transform((s) => s.trim().toLowerCase()),
-  categoryGroup: z.string().max(50).optional(),
+  categoryGroup: z.string().max(50).nullish(),
   // OPT-3: price is optional when variants are provided
-  price: z.number().positive().max(999.99).optional(),
-  variants: z.array(variantSchema).optional(),
-  defaultVariant: z.string().optional(),
+  price: z.number().positive().max(999.99).nullish(),
+  variants: z.array(variantSchema).nullish(),
+  defaultVariant: z.string().nullish(),
   allergens: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
   image_url: z.string().url().nullable().optional(),
