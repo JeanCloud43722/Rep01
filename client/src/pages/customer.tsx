@@ -776,6 +776,7 @@ export default function CustomerPage() {
             pendingOrder={pendingOrder}
             onClearPendingOrder={() => setPendingOrder(null)}
             onConfirmationPendingChange={setIsConfirmationPending}
+            orderStatus={order?.status}
           />
         )}
 

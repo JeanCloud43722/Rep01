@@ -17,7 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox, LayoutGrid, Columns, PackageSearch } from "lucide-react";
+import { FileText, Volume2, VolumeX, LogOut, RotateCcw, Loader2, Sparkles, Inbox, LayoutGrid, Columns, PackageSearch, Bot } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -291,9 +291,17 @@ function OrderCard({
         {confirmedItems.length > 0 && (
           <div className="space-y-2" data-testid={`order-items-section-${order.id}`}>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+              <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                 <ShoppingBag className="h-3 w-3" />
                 Ordered Items ({confirmedItems.length})
+                <Badge
+                  variant="secondary"
+                  className="no-default-active-elevate gap-0.5 px-1.5 py-0 text-[10px] h-4 font-medium"
+                  title="Order placed via AI chat"
+                >
+                  <Bot className="h-2.5 w-2.5" />
+                  AI
+                </Badge>
               </p>
               <Button
                 variant="outline"

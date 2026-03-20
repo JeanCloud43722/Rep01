@@ -42,11 +42,13 @@ interface GuestAssistantProps {
   onClearPendingOrder?: () => void;
   /** Called when order confirmation pending state changes. */
   onConfirmationPendingChange?: (isPending: boolean) => void;
+  /** Current order status — disables ordering chat when notified/completed. */
+  orderStatus?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder, onConfirmationPendingChange }: GuestAssistantProps) {
+export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder, onConfirmationPendingChange, orderStatus }: GuestAssistantProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -61,6 +63,9 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder, onC
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   // Soft-lock: disable chat input while order confirmation is pending
   const [isConfirmationPending, setIsConfirmationPending] = useState(false);
+
+  // Hard-lock: ordering disabled when order is notified or completed
+  const isOrderClosed = orderStatus === "notified" || orderStatus === "completed";
 
   // Initialize PushManager
   useEffect(() => {
@@ -330,47 +335,57 @@ export function GuestAssistant({ orderId, pendingOrder, onClearPendingOrder, onC
           )}
 
           {/* Input area */}
-          <div className="flex gap-2 items-end">
-            <Textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                isConfirmationPending
-                  ? "Please confirm or cancel your current order above."
-                  : orderingMode
-                    ? "Describe your order or ask about menu items…"
-                    : t("ga.placeholder")
-              }
-              className={`resize-none text-sm min-h-[60px] transition-all ${
-                isConfirmationPending
-                  ? "bg-gray-100 border-gray-300 text-gray-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
-                  : ""
-              }`}
-              rows={2}
-              disabled={isLoading || isConfirmationPending}
-              aria-label={t("ga.input_label")}
-              aria-disabled={isConfirmationPending}
-              aria-describedby={isConfirmationPending ? "confirmation-hint" : undefined}
-              data-testid="input-guest-question"
-            />
-            <Button
-              onClick={handleAsk}
-              disabled={!question.trim() || isLoading || isConfirmationPending}
-              size="default"
-              aria-label={t("ga.send_label")}
-              aria-disabled={isConfirmationPending || isLoading}
-              data-testid="button-guest-ask"
+          {isOrderClosed ? (
+            <div
+              className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-300 text-center"
+              role="status"
+              data-testid="chat-order-closed-notice"
             >
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-              )}
-            </Button>
-          </div>
+              Your order has been received — the kitchen is on it! New orders are disabled while this one is active.
+            </div>
+          ) : (
+            <div className="flex gap-2 items-end">
+              <Textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  isConfirmationPending
+                    ? "Please confirm or cancel your current order above."
+                    : orderingMode
+                      ? "Describe your order or ask about menu items…"
+                      : t("ga.placeholder")
+                }
+                className={`resize-none text-sm min-h-[60px] transition-all ${
+                  isConfirmationPending
+                    ? "bg-gray-100 border-gray-300 text-gray-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
+                    : ""
+                }`}
+                rows={2}
+                disabled={isLoading || isConfirmationPending}
+                aria-label={t("ga.input_label")}
+                aria-disabled={isConfirmationPending}
+                aria-describedby={isConfirmationPending ? "confirmation-hint" : undefined}
+                data-testid="input-guest-question"
+              />
+              <Button
+                onClick={handleAsk}
+                disabled={!question.trim() || isLoading || isConfirmationPending}
+                size="default"
+                aria-label={t("ga.send_label")}
+                aria-disabled={isConfirmationPending || isLoading}
+                data-testid="button-guest-ask"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                )}
+              </Button>
+            </div>
+          )}
 
-          {isConfirmationPending && (
+          {isConfirmationPending && !isOrderClosed && (
             <p
               id="confirmation-hint"
               className="text-xs text-gray-500 dark:text-gray-400 text-center"
