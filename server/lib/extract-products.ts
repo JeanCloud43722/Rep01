@@ -130,7 +130,7 @@ async function callDeepSeekWithRetry(
           { role: "user", content: `Extract products from this menu text:\n\n${textChunk}` },
         ],
         temperature: 0.1,
-        max_tokens: 1500,
+        max_tokens: 4096,
         response_format: { type: "json_object" },
       }),
     });
