@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Search, RefreshCw } from "lucide-react";
+import { audioManager } from "@/lib/audio-manager";
 import { CategoryTabs } from "./CategoryTabs";
 import { ProductCard } from "./ProductCard";
 import { ProductModal } from "./ProductModal";
@@ -106,6 +107,8 @@ export function ProductCatalog({ orderId, onSendToChat, isConfirmationPending }:
         }
         return [...prev, item];
       });
+      // Play add-to-cart sound
+      audioManager.playIfUnlocked('add-to-cart');
     },
     [updateCart]
   );

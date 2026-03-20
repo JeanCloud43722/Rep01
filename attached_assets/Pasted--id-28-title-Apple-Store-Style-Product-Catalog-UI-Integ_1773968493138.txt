@@ -1,0 +1,60 @@
+{
+  "id": 28,
+  "title": "Apple‑Store Style Product Catalog UI – Integrate with Existing Chat & Audio",
+  "priority": "P1-High",
+  "context": "The `products` API is ready (`GET /api/products`) with proper caching. The customer page already has a chat interface, audio manager, and i18n support. We will build a beautiful, responsive catalog that seamlessly connects to these existing systems.",
+  "task": "Create the `ProductCatalog` React component with glass‑morphism design, category tabs, real‑time debounced search, detail modals, a cart sidebar, and full mobile optimization – all integrated with the current chat and audio.",
+  "detailed_instructions": [
+    "## 1. Component Structure",
+    "- Create `client/src/components/ProductCatalog/` with subcomponents: `ProductCatalog` (main), `ProductCard` (memoized), `ProductModal`, `CategoryTabs`, `SearchBar`, `CartSidebar`, and barrel export.",
+    "- Use `lucide-react` for icons and `use-debounce` for search input.",
+    
+    "## 2. Glassmorphism with Fallbacks",
+    "- Add CSS classes in `index.css` with `backdrop-filter` for modern browsers, and a solid fallback for older ones.",
+    "- Respect `prefers-reduced-motion`.",
+    
+    "## 3. Search Bar",
+    "- Debounce input (300ms) and fetch from `/api/products?search=...` (the backend already supports prefix matching via ILIKE).",
+    "- Show result count and loading state.",
+    
+    "## 4. Category Tabs",
+    "- Fetch distinct categories from the products API.",
+    "- Horizontal scrollable tabs with snap points, keyboard navigation, and ARIA labels.",
+    
+    "## 5. Product Cards & Modal",
+    "- Each card shows image (or placeholder), name, price, and a quick‑add button.",
+    "- On click, open a modal with full details, allergen badges, tags, quantity selector, and modifications textarea (sanitized).",
+    "- Modal uses `focus-trap-react` and is fully accessible.",
+    
+    "## 6. Cart Sidebar",
+    "- Slide‑in panel showing current cart items, quantities, modifications, and total.",
+    "- Persist cart in `localStorage` with 24h expiry.",
+    "- **Integration with existing chat**: Add a 'Send Order to Chat' button that formats cart contents as a natural language message and sends it via the existing WebSocket (reuse the same function that sends customer messages).",
+    "- Use the existing `audioManager` to play a sound when items are added (`audioManager.play('add-to-cart')` – add this cue if not already present).",
+    
+    "## 7. Integration with Customer Page",
+    "- Add tab navigation between 'Status' and 'Menu' (or a floating action button).",
+    "- Ensure chat input remains accessible (fixed bottom bar).",
+    
+    "## 8. Performance Optimizations",
+    "- Virtualize long lists (if >50 items).",
+    "- Lazy load modal with `React.lazy`.",
+    "- Use React Query with `staleTime: 5min` (the API already sends `Cache-Control` headers).",
+    
+    "## 9. Accessibility",
+    "- ARIA labels, focus management, color contrast, skip‑to‑content link.",
+    
+    "## 10. Testing",
+    "- Test on mobile, tablet, desktop.",
+    "- Verify search returns relevant results (including prefix matches)."
+  ],
+  "replit_note": "The products API is live and ready. The chat WebSocket and audio manager are already in place – leverage them. The cart should feel like a natural extension of the existing UI.",
+  "testing_checkpoint": [
+    "1. Catalog loads products from API.",
+    "2. Search for 'pute' returns turkey dishes (thanks to prefix matching).",
+    "3. Add item to cart – sound plays, cart updates.",
+    "4. 'Send to Chat' – message appears in chat thread.",
+    "5. Mobile view – layout adapts, touch targets ≥44px.",
+    "6. Lighthouse – scores ≥90 for Accessibility, Performance."
+  ]
+}

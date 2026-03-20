@@ -2,6 +2,7 @@ type SoundCue =
   | 'order-ready'      // Customer: urgent buzzer for pickup
   | 'message'          // Customer: gentle chime for staff message
   | 'offer'            // Customer: playful arpeggio for special offer
+  | 'add-to-cart'      // Customer: bright ding when item added to cart
   | 'status-update'    // Customer: subtle ping for status change
   | 'service-request'  // Staff: urgent alert when customer calls waiter
   | 'new-registration' // Staff: upbeat when customer registers
@@ -245,6 +246,14 @@ class AudioManager {
           this.createOscillator(ctx, 'triangle', freq, now + start, 0.3, {
             attack: 0.02, sustain: 0.1, release: 0.18, peak: 0.25
           });
+        });
+      }
+    },
+    'add-to-cart': {
+      duration: 0.35,
+      play: (ctx, now) => {
+        this.createOscillator(ctx, 'sine', 880, now, 0.35, {
+          attack: 0.01, sustain: 0.2, release: 0.14, peak: 0.3
         });
       }
     },
