@@ -9,7 +9,7 @@ import { publishMenuEvent } from "./event-bus";
 import { generatePlaceholderImage, resetImageGenCount } from "./generate-product-image";
 
 const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024;
-const DEEPSEEK_TIMEOUT_MS = 25_000;
+const DEEPSEEK_TIMEOUT_MS = 60_000;
 const CHUNK_MAX_CHARS = 12_000;
 const KB_ROOT = path.join(process.cwd(), "knowledge-base");
 const MAX_RETRIES = 2;

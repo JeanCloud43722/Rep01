@@ -564,12 +564,34 @@ export default function AdminProductsPage() {
     mutationFn: () => apiRequest("POST", "/api/admin/extract-products", { dryRun: false, skipImages: false }),
     onSuccess: async (res) => {
       const data = await res.json();
-      const count = data?.summary?.added ?? "?";
-      toast({ title: "Extraction complete", description: `${count} products added/updated` });
+      const summary = data?.summary;
+      if (!summary) {
+        toast({ title: "Extraction failed", description: "No summary in response", variant: "destructive" });
+        return;
+      }
+      const total = (summary.inserted ?? 0) + (summary.updated ?? 0);
+      const errors = summary.errors && summary.errors.length > 0;
+      if (total === 0 && !errors) {
+        toast({ title: "Extraction complete", description: "No new products found (0 added/updated)" });
+      } else if (total > 0 && !errors) {
+        toast({ title: "Extraction complete", description: `${total} products added/updated` });
+      } else {
+        toast({
+          title: "Extraction complete (with errors)",
+          description: `${total} added/updated, ${summary.errors?.length ?? 0} errors. Check logs.`,
+          variant: "destructive",
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/products"] });
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
     },
-    onError: () => toast({ title: "Extraction failed", description: "Check server logs", variant: "destructive" }),
+    onError: (err) => {
+      toast({
+        title: "Extraction failed",
+        description: err instanceof Error ? err.message : "Check server logs",
+        variant: "destructive",
+      });
+    },
   });
 
   const handleSaved = () => {

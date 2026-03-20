@@ -1,0 +1,67 @@
+{
+  "id": 31,
+  "title": "Diagnose and Fix 'Run Extraction' Button in Admin Product Management",
+  "priority": "P1-High",
+  "context": "The 'Run Extraction' button in the admin products page is not working. It should trigger the product extraction pipeline (re‑import from PDFs) by calling the `POST /api/admin/extract-products` endpoint. The button may be failing due to missing endpoint, authentication issues, extraction script errors, or frontend integration problems.",
+  "task": "Systematically diagnose why the extraction button is not working and fix all underlying issues. Ensure the extraction runs successfully and updates the product list.",
+  "detailed_instructions": [
+    "## 1. Verify Backend Endpoint Existence",
+    "- Open `server/routes.ts` and search for `/api/admin/extract-products`.",
+    "- Confirm that the route is defined and correctly uses the `requireAuth` middleware.",
+    "- Ensure it calls the extraction logic (likely from `server/lib/extract-products.ts`).",
+    "- Check that the endpoint returns a proper JSON response (e.g., `{ success: true, summary: {...} }`).",
+    
+    "## 2. Test the Endpoint Manually",
+    "- Use a tool like `curl` or the browser's DevTools to send a POST request to the endpoint.",
+    "- Example: `curl -X POST http://localhost:5000/api/admin/extract-products -H 'Content-Type: application/json' -H 'Cookie: connect.sid=...'` (you need a valid session cookie from an admin login).",
+    "- Check the response status and body. If it returns an error, read the error message.",
+    "- Look at the server logs (Replit Console) for any errors during the extraction process.",
+    
+    "## 3. Check the Extraction Script Independently",
+    "- Run the extraction script manually from the command line: `npm run extract-products`.",
+    "- If this fails, the issue is in the extraction logic itself (e.g., missing DeepSeek API key, PDF files not found, parsing errors).",
+    "- If it succeeds, the problem is likely in the endpoint or its integration with the script.",
+    
+    "## 4. Inspect Frontend Button Handler",
+    "- Open `client/src/pages/admin-products.tsx` and locate the button (likely labelled 'Run Extraction').",
+    "- Find its `onClick` handler – it should call a mutation function (probably using `useMutation` from React Query).",
+    "- Verify that the mutation sends a POST request to the correct URL (`/api/admin/extract-products`).",
+    "- Check if the request includes credentials (cookies) – it must, because the endpoint is protected. Ensure `credentials: 'include'` is set in the fetch options.",
+    "- Look for any error handling that might swallow errors (e.g., a `try/catch` that doesn't re-throw or show a user-friendly message).",
+    "- Use the browser's DevTools Network tab to see if the request is sent and what response is received.",
+    
+    "## 5. Verify Authentication and Session",
+    "- Ensure the admin is logged in when clicking the button. The endpoint requires a valid session.",
+    "- Check if the session cookie is being sent with the request. In DevTools, look for the `Cookie` header.",
+    "- If not, the mutation may need `withCredentials: true` (if using axios) or `credentials: 'include'` (for fetch).",
+    
+    "## 6. Check for Environment Variables",
+    "- The extraction script requires `DEEPSEEK_API_KEY`. Verify it is set in Replit Secrets.",
+    "- If missing, the extraction will fail. Add it and restart the server.",
+    
+    "## 7. Validate PDF File Locations",
+    "- The extraction script looks for PDFs in `knowledge-base/menu/` and `knowledge-base/icecream/`.",
+    "- Ensure these folders exist and contain PDF files. If not, the extraction will run but find nothing – it should still return a summary with `processed: 0`.",
+    
+    "## 8. Common Pitfalls & Fixes",
+    "- If the endpoint returns 401 Unauthorized, the session is missing. Ensure the frontend sends credentials.",
+    "- If the endpoint returns 500, check the server logs for stack traces. Common issues:",
+    "  - DeepSeek API timeout – increase timeout in the script.",
+    "  - PDF parsing errors – ensure pdf-parse is installed and PDFs are not corrupted.",
+    "  - File permissions – the script needs read access to PDFs.",
+    "- If the extraction runs but products don't update, check that the endpoint returns a successful response and that the frontend invalidates the query cache afterwards. In the mutation's `onSuccess`, call `queryClient.invalidateQueries({ queryKey: ['admin-products'] })`.",
+    
+    "## 9. Add User Feedback",
+    "- While the extraction runs, show a loading spinner on the button.",
+    "- On success, show a toast notification: 'Extraction complete – X products added/updated'.",
+    "- On failure, show an error toast with a helpful message (e.g., 'Extraction failed – check server logs')."
+  ],
+  "replit_note": "Use the Replit Console to watch logs while testing. The extraction may take a minute or more for large menus – ensure the frontend doesn't time out (consider increasing the fetch timeout).",
+  "testing_checkpoint": [
+    "1. Click 'Run Extraction' – button shows loading state, then success toast.",
+    "2. Product list updates automatically.",
+    "3. Check the database – new products appear (or existing ones updated).",
+    "4. If any errors occur, they are clearly displayed in a toast.",
+    "5. All existing tests still pass."
+  ]
+}
