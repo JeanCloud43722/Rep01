@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { ActivityFeed, AppEvent } from "@/components/admin/ActivityFeed";
+import { MessageModal, type Message } from "@/components/admin/MessageModal";
 
 type OrderWithMeta = Order & { totalMessages: number };
 type PaginatedOrdersResponse = { orders: OrderWithMeta[]; total: number; limit: number; offset: number };
@@ -828,121 +829,6 @@ function NotifyModal({
   );
 }
 
-function MessageModal({
-  orderId,
-  open,
-  onClose,
-  onSendMessage,
-  messageHistory
-}: {
-  orderId: string | null;
-  open: boolean;
-  onClose: () => void;
-  onSendMessage: (orderId: string, message: string) => void;
-  messageHistory?: Array<{ id: string; text: string; sender: "staff" | "customer"; sentAt: string }>;
-}) {
-  const [message, setMessage] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const { toast } = useToast();
-
-  const handleSubmit = () => {
-    if (orderId && message.trim()) {
-      onSendMessage(orderId, message);
-      onClose();
-      setMessage("");
-    }
-  };
-
-  const handleOpenChange = (isOpen: boolean) => {
-    if (!isOpen) {
-      setMessage("");
-    }
-    onClose();
-  };
-
-  const handleAiSuggest = async () => {
-    if (!orderId || !messageHistory || messageHistory.length === 0) return;
-    setAiLoading(true);
-    try {
-      const res = await apiRequest("POST", "/api/ai/suggest-reply", {
-        orderId,
-        messageHistory,
-      });
-      const data = (await res.json()) as { suggestion?: string; error?: string };
-      if (data.suggestion) {
-        setMessage(data.suggestion.slice(0, 200));
-        toast({ title: "AI suggestion ready", description: "Review and edit before sending." });
-      }
-    } catch (err: any) {
-      const msg = err?.message?.includes("503")
-        ? "AI reply suggestions are not enabled on this server."
-        : "Could not get AI suggestion. Please try again.";
-      toast({ title: "AI unavailable", description: msg, variant: "destructive" });
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const hasHistory = messageHistory && messageHistory.length > 0;
-  
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Send Message</DialogTitle>
-          <DialogDescription>
-            Send a custom message to the customer (without marking order as ready)
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="custom-message">Message</Label>
-              {hasHistory && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAiSuggest}
-                  disabled={aiLoading}
-                  data-testid="button-ai-suggest"
-                  className="h-7 text-xs gap-1"
-                >
-                  {aiLoading ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                  {aiLoading ? "Thinking…" : "AI Suggest"}
-                </Button>
-              )}
-            </div>
-            <Input
-              id="custom-message"
-              placeholder="e.g., Your order is almost ready..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
-              data-testid="input-custom-message"
-              maxLength={200}
-            />
-            <p className="text-xs text-muted-foreground">
-              {message.length}/200 characters
-            </p>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={!message.trim()} data-testid="button-confirm-message">
-              <MessageSquare className="h-4 w-4 mr-1" />
-              Send Message
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function ScheduleModal({
   orderId,
@@ -1405,8 +1291,17 @@ export default function AdminPage() {
     scheduleMutation.mutate({ orderId, scheduledTime, message });
   };
 
-  const handleSendMessage = (orderId: string, message: string) => {
-    messageMutation.mutate({ orderId, message });
+  const handleSendMessage = async (orderId: string, message: string) => {
+    return new Promise<void>((resolve, reject) => {
+      messageMutation.mutate({ orderId, message }, {
+        onSuccess: () => {
+          resolve();
+        },
+        onError: (err) => {
+          reject(err);
+        },
+      });
+    });
   };
 
   const addOfferMutation = useMutation({
@@ -1809,9 +1704,9 @@ export default function AdminPage() {
         open={!!messageOrderId}
         onClose={() => setMessageOrderId(null)}
         onSendMessage={handleSendMessage}
-        messageHistory={
+        messages={
           [...(activeQuery.data?.orders ?? []), ...(completedQuery.data?.orders ?? [])]
-            .find((o) => o.id === messageOrderId)?.messages
+            .find((o) => o.id === messageOrderId)?.messages as Message[] | undefined
         }
       />
       
