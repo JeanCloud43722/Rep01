@@ -1,0 +1,48 @@
+{
+  "id": 27,
+  "title": "Product Data Extraction from PDFs using DeepSeek – Leveraging RAG Pipeline",
+  "priority": "P1-High",
+  "context": "The restaurant has menu PDFs (in `knowledge-base/menu/` and `knowledge-base/icecream/`) that need to be converted into structured product data for the catalog and ordering system. The existing RAG pipeline already handles German text, umlauts, and compound words correctly – we will reuse its extraction and chunking logic to feed DeepSeek for structured product extraction.",
+  "task": "Create a production‑ready pipeline that uses the existing PDF text extraction and chunking (from the RAG assistant) to extract product information via DeepSeek API, store it in a PostgreSQL `products` table with conflict handling, and provide a cached, filterable API endpoint.",
+  "detailed_instructions": [
+    "## 1. Reuse Existing RAG Infrastructure",
+    "- The system already has functions to extract text from PDFs (`extractTextFromPdf`) and split text into chunks (`chunkText`) in `server/lib/knowledge-base/`. Import and reuse them in the new extraction script.",
+    "- The tokenizer with umlaut normalization (`normalizeToken`) is also available – use it for consistent term handling.",
+    
+    "## 2. Database Schema (shared/db-schema.ts)",
+    "- Add the `products` table with proper indexes (same as before). Include fields: id, name, description, price, category, allergens (text array), tags (text array), imageUrl, createdAt, updatedAt.",
+    "- Add indexes on name, category, and tags (GIN).",
+    
+    "## 3. Zod Schema for Validation (shared/schema.ts)",
+    "- Define `productSchema` with validation rules (name required, price positive, category enum, etc.).",
+    
+    "## 4. Core Extraction Logic (server/lib/extract-products.ts)",
+    "- Create a class `ProductExtractor` that uses the RAG pipeline's text extraction and chunking.",
+    "- For each PDF, extract text via `extractTextFromPdf`, then split into chunks using the same chunk size/overlap as the RAG assistant (500 chars, 50 overlap).",
+    "- For each chunk, call DeepSeek with a system prompt tailored to extract menu items as JSON. The prompt should instruct DeepSeek to return an array of product objects.",
+    "- Use `AbortController` with a timeout (25s) to prevent hanging.",
+    "- Parse the response, validate with Zod, and upsert into `products` table using `ON CONFLICT (name, category) DO UPDATE`.",
+    "- Log progress and errors, and return a summary.",
+    
+    "## 5. CLI Script (scripts/extract-products.ts)",
+    "- Create a script that instantiates `ProductExtractor` and runs extraction with `--dry-run` option.",
+    "- Check for `DEEPSEEK_API_KEY` and exit gracefully if missing.",
+    
+    "## 6. API Endpoint (server/routes/products.ts)",
+    "- Implement `GET /api/products` with filtering by category, search (using ILIKE on name/description), and tags (array containment).",
+    "- Add caching headers (`Cache-Control: public, s-maxage=300, stale-while-revalidate=60`).",
+    "- Use React Query on the frontend with `staleTime: 5min`.",
+    
+    "## 7. Testing & Verification",
+    "- Run `npm run extract-products:dry` to preview extracted products.",
+    "- Run actual extraction and verify data in DB.",
+    "- Test API endpoint with various filters."
+  ],
+  "replit_note": "Reuse existing RAG utilities to avoid code duplication. Ensure `DEEPSEEK_API_KEY` is set. The extraction script will be run on-demand; it may take a few minutes for large menus. Products table will be used by the catalog and AI ordering.",
+  "testing_checkpoint": [
+    "1. Run dry run – verify output includes products with correct fields.",
+    "2. Run full extraction – check database counts.",
+    "3. Call `/api/products` – returns JSON with expected structure.",
+    "4. Test search: `?search=pute` should return turkey dishes (thanks to prefix matching)."
+  ]
+}
