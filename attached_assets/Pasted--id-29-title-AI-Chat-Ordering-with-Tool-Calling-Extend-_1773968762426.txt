@@ -1,0 +1,49 @@
+{
+  "id": 29,
+  "title": "AI Chat Ordering with Tool Calling – Extend Existing RAG Chat",
+  "priority": "P1-High",
+  "context": "The existing chat already answers questions using the RAG pipeline. We will now extend it to handle orders: the AI will use a `search_products` tool (backed by the `products` table), and when an order is confirmed, it will create `order_items` records. The admin dashboard will display these items.",
+  "task": "Upgrade the chat endpoint to support function calling, add the `order_items` and `idempotency_keys` tables, implement the confirmation flow with server‑side price validation, and display items in the admin UI.",
+  "detailed_instructions": [
+    "## 1. Database Extensions",
+    "- Add `order_items` table with fields: id, orderId (references orders.id), productId (references products.id), quantity, modifications, priceAtTime (numeric), createdAt.",
+    "- Add `idempotency_keys` table with fields: key (text primary key), orderId, createdAt (with TTL index).",
+    "- Run migrations.",
+    
+    "## 2. Chat Endpoint Upgrade",
+    "- Modify the existing `POST /api/orders/:id/chat` handler (likely in `server/routes/chat.ts` or `routes.ts`).",
+    "- Integrate DeepSeek function calling with a `search_products` tool. The tool should query the `products` table using the same prefix‑matching logic (ILIKE with normalized terms).",
+    "- Implement loop protection (max 3 iterations) and a global timeout (30s).",
+    "- When the AI returns a JSON order block, send it to the client along with the text reply.",
+    
+    "## 3. Order Confirmation Flow",
+    "- Create `POST /api/orders/:id/confirm-order` that receives `{ items, idempotencyKey }`.",
+    "- Check idempotency key (valid for 10 minutes) to prevent duplicates.",
+    "- For each item, validate product existence, enforce quantity limits (1‑10), and use server‑side price from the `products` table (never trust client prices).",
+    "- Sanitize the `modifications` field using the existing `sanitizeMessage` utility.",
+    "- Insert items in a transaction and update order status if needed (e.g., from `waiting` to `subscribed`).",
+    "- Notify admin via WebSocket (`notifyAdminUpdate`).",
+    
+    "## 4. Frontend: OrderConfirmation Component",
+    "- When the chat response contains a JSON block (detected via the robust `extractOrderJson` utility), display a confirmation card with items, quantities, modifications, and total.",
+    "- Include 'Confirm' and 'Change' buttons. Generate a client‑side idempotency key (UUID) and send with confirmation.",
+    
+    "## 5. Admin Dashboard Integration",
+    "- Extend the admin order detail view to show `order_items` in a table (product name, quantity, modifications, price).",
+    "- Add a small indicator (e.g., a robot icon) for orders placed via AI.",
+    
+    "## 6. Security & Monitoring",
+    "- Ensure the chat endpoint respects rate limiting (add `express-rate-limit` if not already done).",
+    "- Log all AI tool calls and confirmations at debug level.",
+    "- Add an admin debug endpoint to replay chat interactions with tool traces (optional)."
+  ],
+  "replit_note": "The `search_products` tool should reuse the same search logic as the catalog API for consistency. The confirmation endpoint must never trust client‑sent prices. The existing RAG pipeline already handles German text and compound words perfectly.",
+  "testing_checkpoint": [
+    "1. Chat: 'Ich möchte zwei Putenbruststeaks' – AI uses tool, returns JSON.",
+    "2. Confirm – `order_items` inserted with correct server prices.",
+    "3. Admin dashboard shows items.",
+    "4. Duplicate confirmation with same idempotency key is rejected.",
+    "5. Quantity >10 is rejected.",
+    "6. Chat after order completion (status `notified`/`completed`) is disabled or shows warning."
+  ]
+}
