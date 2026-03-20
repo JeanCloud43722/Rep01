@@ -1,0 +1,73 @@
+```json
+{
+  "id": 32,
+  "title": "RAG Assistant Diagnostics & Optimization – Why Is the AI Responding Poorly?",
+  "priority": "P1-High",
+  "context": "The AI Guest Assistant, which previously answered questions accurately about the menu, ingredients, allergens, etc., has started giving poor or unhelpful responses. For example, when asked 'was empfehlen sie mit pute?', it replied that it couldn't find any dishes with turkey, despite the menu likely containing such items. This indicates a potential issue in the RAG pipeline: document ingestion, chunking, retrieval, or prompt design.",
+  "task": "Systematically diagnose and fix the RAG assistant's performance. Identify why relevant information is not being retrieved or correctly interpreted, and implement improvements to ensure accurate, helpful answers.",
+  "detailed_instructions": [
+    "## 1. Verify Document Existence and Content",
+    "- Check which PDF files are present in the `knowledge-base/` folders (menu/, icecream/, etc.).",
+    "- Manually search the PDFs for the term 'Pute' or related words (e.g., 'Putenbrust', 'Truthahn', 'Turkey'). If none exist, the assistant's response is actually correct – but confirm with the restaurant owner.",
+    "- If the term exists, proceed to the next steps.",
+    
+    "## 2. Inspect Extracted Text",
+    "- The system likely extracts text from PDFs using `pdf-parse`. Add a debug script or temporary logging to output the extracted text for the relevant PDFs.",
+    "- Run a search for 'Pute' in the extracted text. Is it present? If not, the extraction may have failed (e.g., due to PDF formatting, scanned images, or encoding issues).",
+    "- If the text is extracted but the term is missing, consider using OCR (Tesseract) for image-based PDFs, or switch to a more robust PDF extraction library like `pdf2json` or `mammoth` for certain formats.",
+    
+    "## 3. Examine Chunking Strategy",
+    "- The system splits long texts into chunks (e.g., 500 characters with 50 overlap). Check the chunk boundaries: does 'Pute' appear near the edge and get cut off?",
+    "- Log the chunks for the relevant PDF and verify that the term is included in at least one chunk.",
+    "- If the term is missing, adjust chunk size (e.g., increase to 1000 tokens) or overlap (e.g., 100 characters) to ensure no information is lost.",
+    
+    "## 4. Review Retrieval Mechanism",
+    "- The current retrieval likely uses a simple TF‑IDF vector space model. Add logging to capture the top N chunks returned for the query 'pute'.",
+    "- Check if the chunk containing 'Pute' is among the top results. If not, the similarity scoring may be inadequate.",
+    "- Possible improvements:",
+    "  - Switch to a more advanced retrieval like BM25 (via `natural` library) or use embeddings (e.g., with `@xenova/transformers`).",
+    "  - Implement partial word matching (e.g., using PostgreSQL `ILIKE` or `tsvector` with stemming).",
+    "  - Boost certain fields (e.g., dish names) over descriptions.",
+    
+    "## 5. Analyze Context Window and Prompt",
+    "- The assistant receives a limited number of chunks (e.g., top 5) due to token limits. Log the actual chunks passed to DeepSeek for the query.",
+    "- If the relevant chunk is not included, increase the number of chunks (e.g., top 10) or implement a re-ranking step.",
+    "- Review the system prompt: does it instruct the assistant to only answer based on the provided context? Does it encourage asking for clarification or referring to staff when unsure? The current response seems to follow that instruction correctly if no context was found.",
+    
+    "## 6. Test with a Known Query",
+    "- Choose a query that should definitely match a known dish, e.g., 'Pizza Margherita'. Run it through the entire pipeline with detailed logging.",
+    "- Verify that the correct chunk is retrieved and that the AI's answer includes that information.",
+    "- Compare the behavior for 'pute' vs. a known term to isolate the issue.",
+    
+    "## 7. Implement Improvements",
+    "Based on the diagnosis, take appropriate action:",
+    "- **If the term is missing from the source PDFs**: Add the missing menu items manually or request updated PDFs.",
+    "- **If extraction fails**: Upgrade PDF parser or add OCR fallback.",
+    "- **If chunking loses context**: Adjust chunk size/overlap and re‑index.",
+    "- **If retrieval fails to rank the relevant chunk**:",
+    "  - Implement BM25 or embeddings.",
+    "  - Add query expansion (e.g., stem 'pute' to also match 'Putenbrust').",
+    "  - Use a hybrid approach (keyword + vector search).",
+    "- **If the prompt is too restrictive**: Modify it to allow the assistant to infer or combine information, but still be accurate.",
+    
+    "## 8. Re‑index and Test",
+    "- After changes, re‑run the indexing process (for extraction-based systems) or update the retrieval index.",
+    "- Re‑test the problematic query and verify that the assistant now provides a helpful answer (e.g., 'Wir haben Putenbrust mit Gemüse und Puten-Curry – möchten Sie mehr erfahren?').",
+    
+    "## 9. Add Monitoring & Logging",
+    "- Implement a debug mode that logs retrieved chunks for each query (available only to admins).",
+    "- Track failed queries (where the assistant says it can't find information) to proactively identify gaps in the knowledge base.",
+    
+    "## 10. Document Findings",
+    "- Update the system documentation with the chosen retrieval strategy and any tuning parameters.",
+    "- Create a runbook for diagnosing future RAG issues."
+  ],
+  "replit_note": "This diagnostic process requires access to the server logs and possibly temporary debugging code. Since the system is on Replit, you can add `console.log` statements and watch the output in the Replit Console. Be mindful of the DeepSeek API costs during testing – use caching or mock responses if needed. The goal is to pinpoint whether the issue is in the data, retrieval, or prompt, and then apply the appropriate fix.",
+  "testing_checkpoint": [
+    "1. After changes, ask 'was empfehlen sie mit pute?' – the assistant should now provide relevant dishes.",
+    "2. Check that the retrieved chunks (via debug logs) include the term 'Pute'.",
+    "3. Verify that other queries still work correctly (regression test).",
+    "4. Ensure the system remains performant (response time <3s)."
+  ]
+}
+```
