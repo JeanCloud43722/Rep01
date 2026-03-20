@@ -60,28 +60,33 @@ function buildSystemPrompt(existingProductsContext?: Array<{ id: number; name: s
       }\n\nINSTRUCTIONS FOR DEDUPLICATION:\n- If the extracted item is semantically identical to an existing product (e.g., "Spag. Bolo" ≈ "Spaghetti Bolognese"), use the EXACT existing name and return existingProductId.\n- If it is a genuinely new product, omit existingProductId.\n`
     : "";
 
-  return `You are a menu data extractor for a restaurant POS system. Extract ALL menu items from the provided text (may be in German or English).
+  return `STRICT JSON OUTPUT REQUIRED.
 
-Return a JSON object with key "products" containing an array of items.
+You are a menu data extractor. Extract ALL items from the menu text. Output ONLY valid JSON with no extra text.
 
-Each product must have:
-- name: string (1-150 chars, keep original language)
+REQUIRED JSON STRUCTURE:
+{"products":[{"name":"...","price":null,"variants":[...],"category":"...","description":null,"categoryGroup":null,"allergens":[],"tags":[],"defaultVariant":null}]}
+
+FIELD RULES:
+- name: string 1-150 chars (original language, exact from menu)
 - description: string or null (max 300 chars)
-- category: string — use EXACT section header from the menu (e.g. "Antipasti", "Hauptgerichte"). Do NOT map to predefined categories.
-- categoryGroup: string or null — higher-level grouping (e.g. "Main Courses"), or null if unclear
-- price: number — single price in euros if only one size (convert "12,50" → 12.5). Omit if using variants.
-- variants: array of {name, price, description?} — for size/type-based pricing (e.g. Small/Large, 200g/400g). Omit if single price.
-- defaultVariant: string — which variant name to show first (only if variants present)
-- allergens: string array — extract any allergen/ingredient information
-- tags: string array — only from: ["vegetarian", "vegan", "gluten-free", "spicy", "popular", "seasonal"]
-- image_url: null (always null)
-- existingProductId: number — ONLY if this matches an existing product from the deduplication list above
+- category: string (exact menu section header like "Antipasti" or "Hauptgerichte")
+- categoryGroup: string or null (e.g. "Appetizers")
+- price: number (euros, null if variants used) OR use variants array
+- variants: [{name, price, description?}] OR null
+- defaultVariant: string name of first variant OR null
+- allergens: string array (extract from text)
+- tags: array of ["vegetarian","vegan","gluten-free","spicy","popular","seasonal"]
 ${existingSection}
-RULES:
-1. Every item must have price OR variants (not both — prefer variants for multi-size items)
-2. Do NOT skip items that have a price
-3. Category must be the exact section name from the PDF layout
-4. For size variants example: {"name":"Pizza Margherita","variants":[{"name":"Small","price":8.00},{"name":"Large","price":12.00}],"defaultVariant":"Small"}`;
+CRITICAL RULES:
+1. Return VALID JSON ONLY — no markdown, no commentary
+2. Escape all quotes: "Müller" not "Müller"
+3. Each item: price XOR variants (use variants if multiple sizes)
+4. Extract every menu item without exception
+5. Category must match menu section exactly
+
+EXAMPLE OUTPUT:
+{"products":[{"name":"Pizza Margherita","category":"Pizza","description":"Tomato, mozzarella","price":null,"variants":[{"name":"Small","price":8.00},{"name":"Large","price":12.00}],"defaultVariant":"Small","categoryGroup":"Main","allergens":["gluten","dairy"],"tags":["vegetarian"]}]}`;
 }
 
 // ─── OPT-2: Fetch existing products for fuzzy deduplication context ───────────
@@ -138,9 +143,47 @@ async function callDeepSeekWithRetry(
       choices?: Array<{ message?: { content?: string } }>;
     };
     const content = result.choices?.[0]?.message?.content;
-    if (!content) return [];
+    if (!content) {
+      logger.warn("DeepSeek returned no content", { source: "extractor" });
+      return [];
+    }
 
-    const parsed = JSON.parse(content) as { products?: unknown };
+    // ─── Robust JSON parsing with lenient recovery ──────────────────────
+    let parsed: { products?: unknown } | unknown[];
+    try {
+      parsed = JSON.parse(content) as { products?: unknown } | unknown[];
+    } catch (parseErr) {
+      // Try lenient parsing: extract JSON object from content
+      const jsonMatch = content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[0]) as { products?: unknown } | unknown[];
+          logger.info("DeepSeek JSON recovered via extraction", {
+            source: "extractor",
+            extractedLength: jsonMatch[0].length,
+          });
+        } catch {
+          const snippet = content.length > 200 ? content.substring(0, 200) + "..." : content;
+          logger.warn("DeepSeek returned invalid JSON (recovery failed)", {
+            source: "extractor",
+            length: content.length,
+            snippet,
+            error: String(parseErr),
+          });
+          return [];
+        }
+      } else {
+        const snippet = content.length > 200 ? content.substring(0, 200) + "..." : content;
+        logger.warn("DeepSeek returned invalid JSON, no JSON structure found", {
+          source: "extractor",
+          length: content.length,
+          snippet,
+          error: String(parseErr),
+        });
+        return [];
+      }
+    }
+
     const arr = Array.isArray(parsed) ? parsed : (parsed?.products ?? []);
     return Array.isArray(arr) ? arr : [];
   } catch (err) {
@@ -150,7 +193,12 @@ async function callDeepSeekWithRetry(
       await new Promise((r) => setTimeout(r, delay));
       return callDeepSeekWithRetry(textChunk, existingProducts, attempt + 1);
     }
-    throw err;
+    // Gracefully degrade: return empty array instead of throwing
+    logger.error("DeepSeek call failed (no retries left), returning empty array", {
+      source: "extractor",
+      err: String(err),
+    });
+    return [];
   } finally {
     clearTimeout(timer);
   }
